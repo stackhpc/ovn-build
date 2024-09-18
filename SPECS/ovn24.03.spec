@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.2
-Release: 19%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 32%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -532,6 +532,58 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
+* Fri Aug 16 2024 Numan Siddique <numans@ovn.org> - 24.03.2-32
+- Reply only for the multicast ND solicitations.
+[Upstream: bc56bc6f70202b9a0dcc27f8a4721e4cfe21edc7]
+
+* Fri Aug 16 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-31
+- Prepare for 24.03.4.
+[Upstream: 1b65173ef13bc738783b9f68058773d4a2aa98bf]
+
+* Fri Aug 16 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-30
+- Set release date for 24.03.3.
+[Upstream: 459a3bab4c4a11b904aa3c37015372d34e1e1209]
+
+* Wed Aug 14 2024 Xavier Simonart <xsimonar@redhat.com> - 24.03.2-29
+- ci: Add nftables to containers.
+[Upstream: 0690deee62d9ea271716ad87aadc33f68bec7c65]
+
+* Wed Aug 14 2024 Xavier Simonart <xsimonar@redhat.com> - 24.03.2-28
+- tests: Skip some tests if nft not installed.
+[Upstream: fe3d7b202434fa401514504cdb4608259681c0f6]
+
+* Mon Aug 12 2024 Rosemarie O'Riorden <roriorden@redhat.com> - 24.03.2-27
+- northd: Clean up SB MAC bindings for deleted ports.
+[Upstream: 9d1b50e8ab75e1a730905d1d99e82652c3901b36]
+
+* Mon Aug 12 2024 Ales Musil <amusil@redhat.com> - 24.03.2-26
+- controller: Make sure the meter and group tables are initialized.
+[Upstream: b01f3b59c6da0da0eea84a8afb346964ae3b7809]
+
+* Thu Aug 08 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-25
+- ci: ovn-kubernetes: Move to stable release-1.0 branch.
+[Upstream: b4c94391b2685266220ef9b263220c0a373ff41c]
+
+* Thu Aug 08 2024 Ilya Maximets <i.maximets@ovn.org> - 24.03.2-24
+- logical-fields: Add missing multicast matches for MLD and IGMP.
+[Upstream: 18d66c8531fcb7bd2ee9abbaa99a7d6c42639ed1]
+
+* Tue Jul 30 2024 Han Zhou <hzhou@ovn.org> - 24.03.2-23
+- debian: Fix upper case package name in changlog.
+[Upstream: 2084f06aafdac5589b7bb67ebaeb3fca4c9b7d5f]
+
+* Mon Jul 22 2024 zhangqiang45 <zhangqiang45@lenovo.com> - 24.03.2-22
+- northd: Fix issues for Forwarding_Group.
+[Upstream: fb434c5b9c86c5c0a6c32385761f6ef136dff0a8]
+
+* Fri Jul 19 2024 Vladislav Odintsov <odivlad@gmail.com> - 24.03.2-21
+- tests: Fix ssl-ciphers RO sb test with old openssl.
+[Upstream: d2faeb5efff1a3177e42d4df4a009807e8cd5dd4]
+
+* Tue Jun 25 2024 Ales Musil <amusil@redhat.com> - 24.03.2-20
+- ci: Move common build steps into script.
+[Upstream: 2e11c9a65130baa944a868ea920ec68ff54412b0]
+
 * Tue Jun 18 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-19
 - tests: ic: Add IP multicast test that simulates the ovn-k8s use case.
 [Upstream: 50c329f561eb4c6b912dd9a1c200872465a2e3dc]

@@ -1,3 +1,42 @@
+diff --git a/.ci/ovn-kubernetes/Dockerfile b/.ci/ovn-kubernetes/Dockerfile
+index eda8b6d02..554b5551b 100644
+--- a/.ci/ovn-kubernetes/Dockerfile
++++ b/.ci/ovn-kubernetes/Dockerfile
+@@ -1,4 +1,4 @@
+-ARG OVNKUBE_COMMIT=master
++ARG OVNKUBE_COMMIT
+ ARG GO_VERSION
+ 
+ FROM fedora:37 AS ovnbuilder
+diff --git a/.github/workflows/ovn-kubernetes.yml b/.github/workflows/ovn-kubernetes.yml
+index 0f2b30497..f7dfd1c39 100644
+--- a/.github/workflows/ovn-kubernetes.yml
++++ b/.github/workflows/ovn-kubernetes.yml
+@@ -13,7 +13,7 @@ concurrency:
+   cancel-in-progress: true
+ 
+ env:
+-  OVNKUBE_COMMIT: "master"
++  OVNKUBE_COMMIT: "release-1.0"
+   KIND_CLUSTER_NAME: ovn
+   KIND_INSTALL_INGRESS: true
+   KIND_ALLOW_SYSTEM_WRITES: true
+@@ -41,6 +41,7 @@ jobs:
+       with:
+           path: src/github.com/ovn-org/ovn-kubernetes
+           repository: ovn-org/ovn-kubernetes
++          ref: ${{ env.OVNKUBE_COMMIT }}
+ 
+     - name: Prepare
+       run: |
+@@ -108,6 +109,7 @@ jobs:
+       with:
+           path: src/github.com/ovn-org/ovn-kubernetes
+           repository: ovn-org/ovn-kubernetes
++          ref: ${{ env.OVNKUBE_COMMIT }}
+ 
+     - name: Prepare
+       run: |
 diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
 index 456ab5c69..22e4d339d 100644
 --- a/.github/workflows/test.yml
@@ -11,19 +50,35 @@ index 456ab5c69..22e4d339d 100644
      timeout-minutes: 30
  
      strategy:
+diff --git a/AUTHORS.rst b/AUTHORS.rst
+index bbc843940..b5eb4dc73 100644
+--- a/AUTHORS.rst
++++ b/AUTHORS.rst
+@@ -451,6 +451,7 @@ xushengping                        shengping.xu@huawei.com
+ yinpeijun                          yinpeijun@huawei.com
+ zangchuanqiang                     zangchuanqiang@huawei.com
+ zhang yanxian                      zhangyanxian@pmlabs.com.cn
++zhangqiang45                       zhangqiang45@lenovo.com
+ zhaojingjing                       zhao.jingjing1@zte.com.cn
+ zhongbaisong                       zhongbaisong@huawei.com
+ zhaozhanxu                         zhaozhanxu@163.com
 diff --git a/NEWS b/NEWS
-index 4d16d97ff..9e4a52f46 100644
+index 4d16d97ff..0fb8d24cc 100644
 --- a/NEWS
 +++ b/NEWS
-@@ -1,3 +1,6 @@
-+OVN v24.03.3 - xx xxx xxxx
+@@ -1,3 +1,10 @@
++OVN v24.03.4 - xx xxx xxxx
 +--------------------------
++
++OVN v24.03.3 - 16 Aug 2024
++--------------------------
++  - Bug fixes
 +
  OVN v24.03.2 - 09 May 2024
  --------------------------
    - Bug fixes
 diff --git a/configure.ac b/configure.ac
-index 962422bd2..688fcd6f9 100644
+index 962422bd2..6a05ba90b 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -13,7 +13,7 @@
@@ -31,12 +86,12 @@ index 962422bd2..688fcd6f9 100644
  
  AC_PREREQ(2.63)
 -AC_INIT(ovn, 24.03.2, bugs@openvswitch.org)
-+AC_INIT(ovn, 24.03.3, bugs@openvswitch.org)
++AC_INIT(ovn, 24.03.4, bugs@openvswitch.org)
  AC_CONFIG_MACRO_DIR([m4])
  AC_CONFIG_AUX_DIR([build-aux])
  AC_CONFIG_HEADERS([config.h])
 diff --git a/controller/ovn-controller.c b/controller/ovn-controller.c
-index 113d3e05c..9b4f1e7b7 100644
+index 113d3e05c..4a32406eb 100644
 --- a/controller/ovn-controller.c
 +++ b/controller/ovn-controller.c
 @@ -731,7 +731,7 @@ update_ct_zones(const struct sset *local_lports,
@@ -148,6 +203,32 @@ index 113d3e05c..9b4f1e7b7 100644
      struct ed_type_lflow_output *fo = data;
      struct ovn_desired_flow_table *lflow_table = &fo->flow_table;
      struct ovn_extend_table *group_table = &fo->group_table;
+@@ -5735,17 +5750,14 @@ main(int argc, char *argv[])
+                                            br_int ? br_int->name : NULL)) {
+                 VLOG_INFO("OVS feature set changed, force recompute.");
+                 engine_set_force_recompute(true);
+-                if (ovs_feature_set_discovered()) {
+-                    uint32_t max_groups = ovs_feature_max_select_groups_get();
+-                    uint32_t max_meters = ovs_feature_max_meters_get();
+-                    struct ed_type_lflow_output *lflow_out_data =
+-                        engine_get_internal_data(&en_lflow_output);
+-
+-                    ovn_extend_table_reinit(&lflow_out_data->group_table,
+-                                            max_groups);
+-                    ovn_extend_table_reinit(&lflow_out_data->meter_table,
+-                                            max_meters);
+-                }
++
++                struct ed_type_lflow_output *lflow_out_data =
++                    engine_get_internal_data(&en_lflow_output);
++
++                ovn_extend_table_reinit(&lflow_out_data->group_table,
++                                        ovs_feature_max_select_groups_get());
++                ovn_extend_table_reinit(&lflow_out_data->meter_table,
++                                        ovs_feature_max_meters_get());
+             }
+ 
+             if (br_int) {
 diff --git a/controller/pinctrl.c b/controller/pinctrl.c
 index b2a380437..984714b4b 100644
 --- a/controller/pinctrl.c
@@ -248,19 +329,34 @@ index b2a380437..984714b4b 100644
      }
  
 diff --git a/debian/changelog b/debian/changelog
-index 3025c9a40..207ea3957 100644
+index 3025c9a40..02d897994 100644
 --- a/debian/changelog
 +++ b/debian/changelog
-@@ -1,3 +1,9 @@
-+OVN (24.03.3-1) unstable; urgency=low
+@@ -1,10 +1,22 @@
+-OVN (24.03.2-1) unstable; urgency=low
++ovn (24.03.4-1) unstable; urgency=low
 +   [ OVN team ]
 +   * New upstream version
 +
-+ -- OVN team <dev@openvswitch.org>  Thu, 09 May 2024 15:10:30 -0400
++ -- OVN team <dev@openvswitch.org>  Fri, 16 Aug 2024 13:51:03 -0400
 +
- OVN (24.03.2-1) unstable; urgency=low
++ovn (24.03.3-1) unstable; urgency=low
++   [ OVN team ]
++   * New upstream version
++
++ -- OVN team <dev@openvswitch.org>  Fri, 16 Aug 2024 13:51:03 -0400
++
++ovn (24.03.2-1) unstable; urgency=low
     [ OVN team ]
     * New upstream version
+ 
+  -- OVN team <dev@openvswitch.org>  Thu, 09 May 2024 15:10:30 -0400
+ 
+-OVN (24.03.1-1) unstable; urgency=low
++ovn (24.03.1-1) unstable; urgency=low
+    [ OVN team ]
+    * New upstream version
+ 
 diff --git a/ic/ovn-ic.c b/ic/ovn-ic.c
 index e947323bf..be23f199d 100644
 --- a/ic/ovn-ic.c
@@ -318,7 +414,7 @@ index 682b0b100..6a61719e1 100644
  
  static void
 diff --git a/lib/logical-fields.c b/lib/logical-fields.c
-index 68892dba5..20219a67a 100644
+index 68892dba5..d84528ef5 100644
 --- a/lib/logical-fields.c
 +++ b/lib/logical-fields.c
 @@ -139,10 +139,6 @@ ovn_init_symtab(struct shash *symtab)
@@ -332,6 +428,40 @@ index 68892dba5..20219a67a 100644
  
      /* Connection tracking state. */
      expr_symtab_add_field_scoped(symtab, "ct_mark", MFF_CT_MARK, NULL, false,
+@@ -247,7 +243,7 @@ ovn_init_symtab(struct shash *symtab)
+     expr_symtab_add_field(symtab, "icmp4.code", MFF_ICMPV4_CODE, "icmp4",
+               false);
+ 
+-    expr_symtab_add_predicate(symtab, "igmp", "ip4 && ip.proto == 2");
++    expr_symtab_add_predicate(symtab, "igmp", "ip4.mcast && ip.proto == 2");
+ 
+     expr_symtab_add_field(symtab, "ip6.src", MFF_IPV6_SRC, "ip6", false);
+     expr_symtab_add_field(symtab, "ip6.dst", MFF_IPV6_DST, "ip6", false);
+@@ -307,6 +303,9 @@ ovn_init_symtab(struct shash *symtab)
+               "icmp6.type == {135, 136} && icmp6.code == 0 && ip.ttl == 255");
+     expr_symtab_add_predicate(symtab, "nd_ns",
+               "icmp6.type == 135 && icmp6.code == 0 && ip.ttl == 255");
++    expr_symtab_add_predicate(symtab, "nd_ns_mcast",
++              "ip6.mcast && icmp6.type == 135 && icmp6.code == 0 && "
++              "ip.ttl == 255");
+     expr_symtab_add_predicate(symtab, "nd_na",
+               "icmp6.type == 136 && icmp6.code == 0 && ip.ttl == 255");
+     expr_symtab_add_predicate(symtab, "nd_rs",
+@@ -321,11 +320,12 @@ ovn_init_symtab(struct shash *symtab)
+      * (RFC 2710 and RFC 3810).
+      */
+     expr_symtab_add_predicate(symtab, "mldv1",
+-                              "ip6.src == fe80::/10 && "
++                              "eth.mcastv6 && ip6.src == fe80::/10 && "
+                               "icmp6.type == {130, 131, 132}");
+     /* MLDv2 packets are sent to ff02::16 (RFC 3810, 5.2.14) */
+     expr_symtab_add_predicate(symtab, "mldv2",
+-                              "ip6.dst == ff02::16 && icmp6.type == 143");
++                              "eth.mcastv6 && ip6.dst == ff02::16 && "
++                              "icmp6.type == 143");
+ 
+     expr_symtab_add_predicate(symtab, "tcp", "ip.proto == 6");
+     expr_symtab_add_field(symtab, "tcp.src", MFF_TCP_SRC, "tcp", false);
 diff --git a/northd/aging.c b/northd/aging.c
 index b76963a2d..9685044e7 100644
 --- a/northd/aging.c
@@ -346,7 +476,7 @@ index b76963a2d..9685044e7 100644
  
          aging_context_set_threshold(&ctx, &threshold_config);
 diff --git a/northd/northd.c b/northd/northd.c
-index a4bd3798b..edddc4bde 100644
+index a4bd3798b..8862c788b 100644
 --- a/northd/northd.c
 +++ b/northd/northd.c
 @@ -118,6 +118,7 @@ static bool default_acl_drop;
@@ -408,7 +538,67 @@ index a4bd3798b..edddc4bde 100644
          ovn_lflow_metered(lflows, od, S_SWITCH_OUT_PRE_LB, 120, match,
                            "clone { igmp; }; next;",
                            copp_meter_get(COPP_IGMP, od->nbs->copp,
-@@ -8949,7 +8953,9 @@ build_lswitch_arp_nd_responder_known_ips(struct ovn_port *op,
+@@ -7882,13 +7886,16 @@ build_fwd_group_lflows(struct ovn_datapath *od, struct lflow_table *lflows,
+     struct ds actions = DS_EMPTY_INITIALIZER;
+     struct ds group_ports = DS_EMPTY_INITIALIZER;
+ 
+-    for (int i = 0; i < od->nbs->n_forwarding_groups; ++i) {
++    for (size_t i = 0; i < od->nbs->n_forwarding_groups; ++i) {
+         const struct nbrec_forwarding_group *fwd_group = NULL;
+         fwd_group = od->nbs->forwarding_groups[i];
+         if (!fwd_group->n_child_port) {
+             continue;
+         }
+ 
++        ds_clear(&match);
++        ds_clear(&actions);
++
+         /* ARP responder for the forwarding group's virtual IP */
+         ds_put_format(&match, "arp.tpa == %s && arp.op == 1",
+                       fwd_group->vip);
+@@ -7919,9 +7926,9 @@ build_fwd_group_lflows(struct ovn_datapath *od, struct lflow_table *lflows,
+             ds_put_cstr(&group_ports, "liveness=\"true\",");
+         }
+         ds_put_cstr(&group_ports, "childports=");
+-        for (i = 0; i < (fwd_group->n_child_port - 1); ++i) {
++        for (size_t j = 0; j < (fwd_group->n_child_port - 1); ++j) {
+             ds_put_format(&group_ports, "\"%s\",",
+-                         fwd_group->child_port[i]);
++                          fwd_group->child_port[j]);
+         }
+         ds_put_format(&group_ports, "\"%s\"",
+                       fwd_group->child_port[fwd_group->n_child_port - 1]);
+@@ -8882,16 +8889,21 @@ build_lswitch_arp_nd_responder_known_ips(struct ovn_port *op,
+                                                   op->lflow_ref);
+             }
+ 
+-            /* For ND solicitations, we need to listen for both the
+-             * unicast IPv6 address and its all-nodes multicast address,
+-             * but always respond with the unicast IPv6 address. */
++            /* For ND solicitations:
++             *   - Reply only for the all-nodes multicast address(es) of the
++             *     logical port IPv6 address(es).
++             *
++             *   - Do not reply for unicast ND solicitations.  Let the target
++             *     reply to it, so that the sender has the ability to monitor
++             *     the target liveness via the unicast ND solicitations.
++             */
+             for (size_t j = 0; j < op->lsp_addrs[i].n_ipv6_addrs; j++) {
+                 ds_clear(match);
+-                ds_put_format(match,
+-                        "nd_ns && ip6.dst == {%s, %s} && nd.target == %s",
+-                        op->lsp_addrs[i].ipv6_addrs[j].addr_s,
+-                        op->lsp_addrs[i].ipv6_addrs[j].sn_addr_s,
+-                        op->lsp_addrs[i].ipv6_addrs[j].addr_s);
++                ds_put_format(
++                    match,
++                    "nd_ns_mcast && ip6.dst == %s && nd.target == %s",
++                    op->lsp_addrs[i].ipv6_addrs[j].sn_addr_s,
++                    op->lsp_addrs[i].ipv6_addrs[j].addr_s);
+ 
+                 ds_clear(actions);
+                 ds_put_format(actions,
+@@ -8949,7 +8961,9 @@ build_lswitch_arp_nd_responder_known_ips(struct ovn_port *op,
          if (op->proxy_arp_addrs.n_ipv4_addrs) {
              /* Match rule on all proxy ARP IPs. */
              ds_clear(match);
@@ -419,7 +609,7 @@ index a4bd3798b..edddc4bde 100644
  
              for (i = 0; i < op->proxy_arp_addrs.n_ipv4_addrs; i++) {
                  ds_put_format(match, "%s/%u,",
-@@ -9003,7 +9009,8 @@ build_lswitch_arp_nd_responder_known_ips(struct ovn_port *op,
+@@ -9003,7 +9017,8 @@ build_lswitch_arp_nd_responder_known_ips(struct ovn_port *op,
              ds_truncate(&nd_target_match, nd_target_match.length - 2);
              ds_clear(match);
              ds_put_format(match,
@@ -429,7 +619,7 @@ index a4bd3798b..edddc4bde 100644
                            "&& ip6.dst == { %s } "
                            "&& nd.target == { %s }",
                            ds_cstr(&ip6_dst_match),
-@@ -9279,15 +9286,14 @@ build_lswitch_destination_lookup_bmcast(struct ovn_datapath *od,
+@@ -9279,15 +9294,14 @@ build_lswitch_destination_lookup_bmcast(struct ovn_datapath *od,
          ds_put_cstr(actions, "igmp;");
          /* Punt IGMP traffic to controller. */
          ovn_lflow_metered(lflows, od, S_SWITCH_IN_L2_LKUP, 100,
@@ -447,7 +637,7 @@ index a4bd3798b..edddc4bde 100644
                            copp_meter_get(COPP_IGMP, od->nbs->copp,
                                           meter_groups),
                            lflow_ref);
-@@ -9355,16 +9361,8 @@ build_lswitch_destination_lookup_bmcast(struct ovn_datapath *od,
+@@ -9355,16 +9369,8 @@ build_lswitch_destination_lookup_bmcast(struct ovn_datapath *od,
  }
  
  
@@ -466,7 +656,7 @@ index a4bd3798b..edddc4bde 100644
  static void
  build_lswitch_ip_mcast_igmp_mld(struct ovn_igmp_group *igmp_group,
                                  struct lflow_table *lflows,
-@@ -9378,9 +9376,6 @@ build_lswitch_ip_mcast_igmp_mld(struct ovn_igmp_group *igmp_group,
+@@ -9378,9 +9384,6 @@ build_lswitch_ip_mcast_igmp_mld(struct ovn_igmp_group *igmp_group,
          ds_clear(match);
          ds_clear(actions);
  
@@ -476,7 +666,7 @@ index a4bd3798b..edddc4bde 100644
          struct mcast_switch_info *mcast_sw_info =
              &igmp_group->datapath->mcast_info.sw;
          uint64_t table_size = mcast_sw_info->table_size;
-@@ -9426,7 +9421,7 @@ build_lswitch_ip_mcast_igmp_mld(struct ovn_igmp_group *igmp_group,
+@@ -9426,7 +9429,7 @@ build_lswitch_ip_mcast_igmp_mld(struct ovn_igmp_group *igmp_group,
          }
  
          /* Also flood traffic to all multicast routers with relay enabled. */
@@ -485,6 +675,29 @@ index a4bd3798b..edddc4bde 100644
              ds_put_cstr(actions,
                          "clone { "
                              "outport = \""MC_MROUTER_FLOOD "\"; "
+@@ -17144,7 +17147,8 @@ build_static_mac_binding_table(
+     struct hmap *lr_ports)
+ {
+     /* Cleanup SB Static_MAC_Binding entries which do not have corresponding
+-     * NB Static_MAC_Binding entries. */
++     * NB Static_MAC_Binding entries, and SB Static_MAC_Binding entries for
++     * which there is not a NB Logical_Router_Port of the same name. */
+     const struct nbrec_static_mac_binding *nb_smb;
+     const struct sbrec_static_mac_binding *sb_smb;
+     SBREC_STATIC_MAC_BINDING_TABLE_FOR_EACH_SAFE (sb_smb,
+@@ -17154,6 +17158,12 @@ build_static_mac_binding_table(
+                                                sb_smb->ip);
+         if (!nb_smb) {
+             sbrec_static_mac_binding_delete(sb_smb);
++            continue;
++        }
++
++        struct ovn_port *op = ovn_port_find(lr_ports, nb_smb->logical_port);
++        if (!op || !op->nbrp || !op->od || !op->od->sb) {
++            sbrec_static_mac_binding_delete(sb_smb);
+         }
+     }
+ 
 diff --git a/northd/northd.h b/northd/northd.h
 index 5e9fa4745..3f1cd8341 100644
 --- a/northd/northd.h
@@ -539,6 +752,29 @@ index b1be73cb2..096698fff 100644
  
      unixctl_command_reply(conn, NULL);
  }
+diff --git a/ovn-sb.xml b/ovn-sb.xml
+index a9789e14e..d8bdf2053 100644
+--- a/ovn-sb.xml
++++ b/ovn-sb.xml
+@@ -1155,6 +1155,7 @@
+       <ul>
+         <li><code>eth.bcast</code> expands to <code>eth.dst == ff:ff:ff:ff:ff:ff</code></li>
+         <li><code>eth.mcast</code> expands to <code>eth.dst[40]</code></li>
++        <li><code>eth.mcastv6</code> expands to <code>eth.dst[32..47] == 0x3333</code></li>
+         <li><code>vlan.present</code> expands to <code>vlan.tci[12]</code></li>
+         <li><code>ip4</code> expands to <code>eth.type == 0x800</code></li>
+         <li><code>ip4.src_mcast</code> expands to
+@@ -1170,8 +1171,10 @@
+         <li><code>ip.first_frag</code> expands to <code>ip.is_frag &amp;&amp; !ip.later_frag</code></li>
+         <li><code>arp</code> expands to <code>eth.type == 0x806</code></li>
+         <li><code>rarp</code> expands to <code>eth.type == 0x8035</code></li>
++        <li><code>ip6.mcast</code> expands to <code>eth.mcastv6 &amp;&amp; ip6.dst[120..127] == 0xff</code></li>
+         <li><code>nd</code> expands to <code>icmp6.type == {135, 136} &amp;&amp; icmp6.code == 0 &amp;&amp; ip.ttl == 255</code></li>
+         <li><code>nd_ns</code> expands to <code>icmp6.type == 135 &amp;&amp; icmp6.code == 0 &amp;&amp; ip.ttl == 255</code></li>
++        <li><code>nd_ns_mcast</code> expands to <code>ip6.mcast  &amp;&amp; icmp6.type == 135 &amp;&amp; icmp6.code == 0 &amp;&amp; ip.ttl == 255</code></li>
+         <li><code>nd_na</code> expands to <code>icmp6.type == 136 &amp;&amp; icmp6.code == 0 &amp;&amp; ip.ttl == 255</code></li>
+         <li><code>nd_rs</code> expands to <code>icmp6.type == 133 &amp;&amp;
+         icmp6.code == 0 &amp;&amp; ip.ttl == 255</code></li>
 diff --git a/tests/ovn-controller.at b/tests/ovn-controller.at
 index 10aff7b67..cfdc7b6e2 100644
 --- a/tests/ovn-controller.at
@@ -854,8 +1090,60 @@ index ad24011f2..536886fac 100644
  
  # Send an IP multicast packet from LSP2, it should be forwarded
  # to lsp1 and lsp3.
+diff --git a/tests/ovn-macros.at b/tests/ovn-macros.at
+index 344fdd69c..7fb570ea9 100644
+--- a/tests/ovn-macros.at
++++ b/tests/ovn-macros.at
+@@ -1029,16 +1029,18 @@ stop_ovsdb_controller_updates() {
+   TCP_PORT=$1
+   echo Stopping updates from ovn-controller to ovsdb using port $TCP_PORT
+   on_exit 'nft list tables | grep ovn-test && nft delete table ip ovn-test'
+-  nft add table ip ovn-test
+-  nft 'add chain ip ovn-test INPUT { type filter hook input priority 0; policy accept; }'
+-  nft add rule ip ovn-test INPUT tcp dport $TCP_PORT counter drop
++  # Report the test as skipped if proper nft related packages are not installed.
++  AT_SKIP_IF([! which nft])
++  AT_CHECK([nft add table ip ovn-test])
++  AT_CHECK([nft 'add chain ip ovn-test INPUT { type filter hook input priority 0; policy accept; }'])
++  AT_CHECK([nft add rule ip ovn-test INPUT tcp dport $TCP_PORT counter drop])
+ }
+ 
+ restart_ovsdb_controller_updates() {
+   TCP_PORT=$1
+   echo Restarting updates from ovn-controller to ovsdb
+-  nft list ruleset | grep $TCP_PORT
+-  nft delete table ip ovn-test
++  AT_CHECK([nft list ruleset | grep $TCP_PORT], [0], [ignore])
++  AT_CHECK([nft delete table ip ovn-test])
+ }
+ 
+ trim_zeros() {
+diff --git a/tests/ovn-northd.at b/tests/ovn-northd.at
+index 3576594e3..de56058f6 100644
+--- a/tests/ovn-northd.at
++++ b/tests/ovn-northd.at
+@@ -7825,6 +7825,19 @@ wait_row_count Static_MAC_Binding 1 logical_port=lr0-p0 ip=192.168.10.100 mac="0
+ AT_CLEANUP
+ ])
+ 
++OVN_FOR_EACH_NORTHD_NO_HV([
++AT_SETUP([LR NB Static_MAC_Binding garbage collection])
++ovn_start
++
++check ovn-nbctl lr-add lr -- lrp-add lr lr-lrp 00:00:00:00:00:01 1.1.1.1/24
++check ovn-nbctl static-mac-binding-add lr-lrp 1.1.1.2 00:00:00:00:00:02
++wait_row_count sb:Static_MAC_Binding 1 logical_port=lr-lrp ip=1.1.1.2 mac="00\:00\:00\:00\:00\:02"
++check ovn-nbctl lr-del lr
++wait_row_count sb:Static_MAC_Binding 0
++
++AT_CLEANUP
++])
++
+ OVN_FOR_EACH_NORTHD_NO_HV([
+ AT_SETUP([LR neighbor lookup and learning flows])
+ ovn_start
 diff --git a/tests/ovn.at b/tests/ovn.at
-index c947b2d30..7b8d09ac1 100644
+index c947b2d30..5d4495947 100644
 --- a/tests/ovn.at
 +++ b/tests/ovn.at
 @@ -1304,6 +1304,9 @@ ct_commit { ct_label=0x181716151413121110090807060504030201; };
@@ -868,7 +1156,80 @@ index c947b2d30..7b8d09ac1 100644
  
  # ct_commit_to_zone
  ct_commit_to_zone(dnat);
-@@ -32566,7 +32569,7 @@ AT_CHECK([ovn-sbctl dump-flows |
+@@ -5849,13 +5852,24 @@ for i in 1 2 3; do
+ 
+     # Test ICMPv6 MLD reports (v1 and v2) and NS for DAD
+     sip=::
+-    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 f0:00:00:00:00:21 $sip ff02::16:0 "ICMPv6MLReport()" 21
+-    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 f0:00:00:00:00:21 $sip ff02::16:0 "ICMPv6MLReport2()" 21
+-    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 f0:00:00:00:00:21 $sip ff02::ea:2aea:fffe:2800 "ICMPv6ND_NS()" 21
++    # Multicast traffic is delivered to all ports, except for the source.
++    out_ports=
++    for j in 1 2 3; do
++        for k in 1 2 3; do
++            if test "${j}${k}" -eq "${i}3"; then
++                continue
++            else
++                out_ports="$out_ports ${j}${k}"
++            fi
++        done
++    done
++    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 33:33:00:16:00:00 $sip ff02::16:0 "ICMPv6MLReport()" ${out_ports}
++    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 33:33:00:16:00:00 $sip ff02::16:0 "ICMPv6MLReport2()" ${out_ports}
++    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 33:33:ff:fe:28:00 $sip ff02::ea:2aea:fffe:2800 "ICMPv6ND_NS()" ${out_ports}
+     # Traffic to non-multicast traffic should be dropped
+     test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 f0:00:00:00:00:21 $sip $tip "ICMPv6MLReport()"
+     # Traffic of other ICMPv6 types should be dropped
+-    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 f0:00:00:00:00:21 $sip ff02::16:0 "ICMPv6EchoRequest()"
++    test_icmpv6 ${i}3 f0:00:00:00:0${i}:${i}3 33:33:00:16:00:00 $sip ff02::16:0 "ICMPv6EchoRequest()"
+ 
+     # should be dropped
+     sip=ae80::ea2aeafffe2800aa
+@@ -8536,7 +8550,7 @@ done
+ # Complete Neighbor Solicitation packet and Neighbor Advertisement packet
+ # vif1 -> NS -> vif2.  vif1 <- NA <- ovn-controller.
+ # vif2 will not receive NS packet, since ovn-controller will reply for it.
+-ns_packet=3333ffa1f9aefa163e94059886dd6000000000203afffd81ce49a9480000f8163efffe940598fd81ce49a9480000f8163efffea1f9ae8700e01160000000fd81ce49a9480000f8163efffea1f9ae0101fa163e940598
++ns_packet=3333ffa1f9aefa163e94059886dd6000000000203afffd81ce49a9480000f8163efffe940598ff0200000000000000000001ffa1f9ae8700e01160000000fd81ce49a9480000f8163efffea1f9ae0101fa163e940598
+ na_packet=fa163e940598fa163ea1f9ae86dd6000000000203afffd81ce49a9480000f8163efffea1f9aefd81ce49a9480000f8163efffe9405988800e9ed60000000fd81ce49a9480000f8163efffea1f9ae0201fa163ea1f9ae
+ 
+ as hv1 ovs-appctl netdev-dummy/receive vif1 $ns_packet
+@@ -14333,7 +14347,7 @@ test_ns_na() {
+     local inport=$1 src_mac=$2 dst_mac=$3 src_ip=$4 dst_ip=$5
+ 
+     packet=$(fmt_pkt "
+-        Ether(dst='ff:ff:ff:ff:ff:ff', src='${src_mac}') /
++        Ether(dst='33:33:ff:ff:ff:ff', src='${src_mac}') /
+         IPv6(src='${src_ip}', dst='ff02::1:ff00:2') /
+         ICMPv6ND_NS(tgt='${dst_ip}')
+     ")
+@@ -14373,8 +14387,8 @@ test_mldv2() {
+     local inport=$1 outport=$2 src_mac=$3 src_ip=$4
+ 
+     packet=$(fmt_pkt "
+-        Ether(dst='ff:ff:ff:ff:ff:ff', src='${src_mac}') /
+-        IPv6(src='${src_ip}', dst='ff02::2') /
++        Ether(dst='33:33:00:00:00:01', src='${src_mac}') /
++        IPv6(src='${src_ip}', dst='ff02::1') /
+         ICMPv6MLQuery2()
+     ")
+     as hv1 ovs-appctl netdev-dummy/receive vif${inport} $packet
+@@ -26987,7 +27001,14 @@ check ovs-vsctl add-port br-int vif3 -- set Interface vif3 external-ids:iface-id
+ # Add a forwarding group on ls2 with lsp21 and lsp22 as child ports
+ # virtual IP - 172.16.1.11, virtual MAC - 00:11:de:ad:be:ef
+ check ovn-nbctl --wait=hv fwd-group-add fwd_grp1 ls2 172.16.1.11 00:11:de:ad:be:ef lsp21 lsp22
++check ovn-nbctl --wait=hv fwd-group-add fwd_grp2 ls2 172.16.2.11 00:22:de:ad:be:ef lsp21 lsp22
+ 
++# Check logical flow
++AT_CAPTURE_FILE([sbflows])
++ovn-sbctl dump-flows > sbflows
++AT_CHECK([grep ls_in_l2_lkup sbflows | grep fwd_group | wc -l], [0], [2
++])
++check ovn-nbctl --wait=hv fwd-group-del fwd_grp2
+ # Check logical flow
+ AT_CAPTURE_FILE([sbflows])
+ ovn-sbctl dump-flows > sbflows
+@@ -32566,7 +32587,7 @@ AT_CHECK([ovn-sbctl dump-flows |
            grep ls_in_arp_rsp |
            grep "${arp_proxy_ls1[[1]]}" |
            sed 's/table=../table=??/'], [0], [dnl
@@ -877,7 +1238,7 @@ index c947b2d30..7b8d09ac1 100644
  arp.tpa == {169.254.238.0/24,169.254.239.2/32}), dnl
  action=(eth.dst = eth.src; eth.src = 00:00:00:01:02:f1; arp.op = 2; dnl
  /* ARP reply */ arp.tha = arp.sha; arp.sha = 00:00:00:01:02:f1; dnl
-@@ -32579,7 +32582,7 @@ AT_CHECK([ovn-sbctl dump-flows |
+@@ -32579,7 +32600,7 @@ AT_CHECK([ovn-sbctl dump-flows |
            grep "${arp_proxy_ls1[[3]]}" |
            sed 's/table=../table=??/'], [0], [dnl
    table=??(ls_in_arp_rsp      ), priority=30   , dnl
@@ -886,7 +1247,7 @@ index c947b2d30..7b8d09ac1 100644
  fd7b:6b4d:7b25:d22f::1/128, ff02::1:ff00:1/128 } && dnl
  nd.target == { fd7b:6b4d:7b25:d22d::/64, fd7b:6b4d:7b25:d22f::1/128 }), dnl
  action=(nd_na_router { eth.src = 00:00:00:01:02:f1; ip6.src = nd.target; dnl
-@@ -32593,7 +32596,7 @@ AT_CHECK([ovn-sbctl dump-flows |
+@@ -32593,7 +32614,7 @@ AT_CHECK([ovn-sbctl dump-flows |
            grep "${arp_proxy_ls2[[2]]}" |
            sed 's/table=../table=??/'], [0], [dnl
    table=??(ls_in_arp_rsp      ), priority=30   , dnl
@@ -895,7 +1256,7 @@ index c947b2d30..7b8d09ac1 100644
  action=(eth.dst = eth.src; eth.src = 00:00:00:02:02:f1; arp.op = 2; dnl
  /* ARP reply */ arp.tha = arp.sha; arp.sha = 00:00:00:02:02:f1; dnl
  arp.tpa <-> arp.spa; outport = inport; flags.loopback = 1; output;)
-@@ -32605,7 +32608,7 @@ AT_CHECK([ovn-sbctl dump-flows |
+@@ -32605,7 +32626,7 @@ AT_CHECK([ovn-sbctl dump-flows |
            grep "${arp_proxy_ls2[[4]]}" |
            sed 's/table=../table=??/'], [0], [dnl
    table=??(ls_in_arp_rsp      ), priority=30   , dnl
@@ -904,7 +1265,7 @@ index c947b2d30..7b8d09ac1 100644
  fd7b:6b4d:7b25:d22c::1/128, ff02::1:ff00:1/128 } && dnl
  nd.target == { fd7b:6b4d:7b25:d22b::/64, fd7b:6b4d:7b25:d22c::1/128 }), dnl
  action=(nd_na_router { eth.src = 00:00:00:02:02:f1; ip6.src = nd.target; dnl
-@@ -34329,10 +34332,15 @@ AT_CHECK([ovn-nbctl lsp-set-addresses ln_port unknown])
+@@ -34329,10 +34350,15 @@ AT_CHECK([ovn-nbctl lsp-set-addresses ln_port unknown])
  AT_CHECK([ovn-nbctl lsp-set-type ln_port localnet])
  AT_CHECK([ovn-nbctl lsp-set-options ln_port network_name=physnet1])
  
@@ -924,7 +1285,7 @@ index c947b2d30..7b8d09ac1 100644
  
  AT_CHECK([ovn-nbctl lsp-add internal internal-gw])
  AT_CHECK([ovn-nbctl lsp-set-type internal-gw router])
-@@ -34345,9 +34353,12 @@ AT_CHECK([ovn-nbctl lsp-set-addresses vif1 "00:00:00:00:20:10 192.168.20.10"])
+@@ -34345,9 +34371,12 @@ AT_CHECK([ovn-nbctl lsp-set-addresses vif1 "00:00:00:00:20:10 192.168.20.10"])
  AT_CHECK([ovn-nbctl lsp-add internal vif2])
  AT_CHECK([ovn-nbctl lsp-set-addresses vif2 "00:00:00:00:20:20 192.168.20.20"])
  
@@ -940,7 +1301,7 @@ index c947b2d30..7b8d09ac1 100644
  
  sim_add hv1
  as hv1
-@@ -34415,21 +34426,27 @@ send_udp() {
+@@ -34415,21 +34444,27 @@ send_udp() {
      as $hv ovs-appctl netdev-dummy/receive $dev $packet
  }
  # Check if the option is not present by default
@@ -975,7 +1336,7 @@ index c947b2d30..7b8d09ac1 100644
  ])
  
  timestamp=$(fetch_column mac_binding timestamp ip="192.168.10.20")
-@@ -34440,8 +34457,8 @@ send_udp hv2 ext2 20
+@@ -34440,8 +34475,8 @@ send_udp hv2 ext2 20
  OVS_WAIT_UNTIL([as hv1 ovs-ofctl dump-flows br-int table=79 | grep "192.168.10.10" | grep -q "n_packets=1"])
  OVS_WAIT_UNTIL([as hv2 ovs-ofctl dump-flows br-int table=79 | grep "192.168.10.20" | grep -q "n_packets=1"])
  
@@ -986,7 +1347,7 @@ index c947b2d30..7b8d09ac1 100644
  AT_CHECK([fetch_column nb:logical_router options | grep -q mac_binding_age_threshold=5])
  AT_CHECK([ovn-nbctl --wait=sb sync])
  
-@@ -34450,28 +34467,31 @@ send_udp hv2 ext2 20
+@@ -34450,28 +34485,31 @@ send_udp hv2 ext2 20
  sleep 1
  send_udp hv2 ext2 20
  
@@ -1025,7 +1386,7 @@ index c947b2d30..7b8d09ac1 100644
  AT_CHECK([ovn-sbctl get datapath $uuid external_ids:mac_binding_age_threshold], [0], [dnl
  "2"
  ])
-@@ -34481,22 +34501,32 @@ send_garp hv1 ext1 10 # belong to 192.168.10.0/24
+@@ -34481,22 +34519,32 @@ send_garp hv1 ext1 10 # belong to 192.168.10.0/24
  send_garp hv2 ext2 20 # belong to 192.168.10.20/32
  send_garp hv2 ext2 65 # belong to 192.168.10.64/26
  
@@ -1066,7 +1427,7 @@ index c947b2d30..7b8d09ac1 100644
  AT_CHECK([ovn-sbctl get datapath $uuid external_ids:mac_binding_age_threshold], [0], [dnl
  "1"
  ])
-@@ -34505,28 +34535,69 @@ AT_CHECK([ovn-sbctl get datapath $uuid external_ids:mac_binding_age_threshold],
+@@ -34505,28 +34553,69 @@ AT_CHECK([ovn-sbctl get datapath $uuid external_ids:mac_binding_age_threshold],
  send_garp hv1 ext1 10 # belong to default
  send_garp hv2 ext2 65 # belong to 192.168.10.64/26
  
@@ -1144,7 +1505,7 @@ index c947b2d30..7b8d09ac1 100644
  
  OVN_CLEANUP([hv1], [hv2])
  AT_CLEANUP
-@@ -35033,7 +35104,10 @@ check_default_flows() {
+@@ -35033,7 +35122,10 @@ check_default_flows() {
  
  # Check that every drop flow gets sampled.
  check_sample_drops() {
@@ -1156,7 +1517,7 @@ index c947b2d30..7b8d09ac1 100644
      check ovn-nbctl -- remove NB_Global . options debug_drop_collector_set \
                      -- remove NB_Global . options debug_drop_domain_id
      check ovn-nbctl --wait=hv sync
-@@ -35043,14 +35117,52 @@ check_sample_drops() {
+@@ -35043,14 +35135,52 @@ check_sample_drops() {
      # Take match part of flows that contain "drop".
      drop_matches="$(grep 'drop' oflows_nosample | grep -oP 'table=\d*, priority=.* ')"
  
@@ -1210,7 +1571,7 @@ index c947b2d30..7b8d09ac1 100644
      ovs-ofctl dump-flows --no-stats br-int > oflows_sample
      AT_CAPTURE_FILE([oflows_sample])
  
-@@ -35058,6 +35170,8 @@ check_sample_drops() {
+@@ -35058,6 +35188,8 @@ check_sample_drops() {
      save_IFS=$IFS
      IFS=$'\n'
      for flow in $drop_matches; do
@@ -1219,7 +1580,7 @@ index c947b2d30..7b8d09ac1 100644
          AT_CHECK([grep "${flow}actions=.*sample.*" oflows_sample], [0], [ignore], [ignore], [echo "Flow $flow has a drop and did not get sampled"])
      done
      IFS=$save_IFS
-@@ -35070,9 +35184,9 @@ check_drops() {
+@@ -35070,9 +35202,9 @@ check_drops() {
      check_default_flows
  
      as hv1
@@ -1231,7 +1592,7 @@ index c947b2d30..7b8d09ac1 100644
  }
  
  # Logical network:
-@@ -35140,7 +35254,8 @@ ovs-vsctl -- add-port br-int hv2-vif1 -- \
+@@ -35140,7 +35272,8 @@ ovs-vsctl -- add-port br-int hv2-vif1 -- \
  wait_for_ports_up
  check ovn-nbctl --wait=hv sync
  
@@ -1241,7 +1602,7 @@ index c947b2d30..7b8d09ac1 100644
  
  # Add stateless ACL
  check ovn-nbctl --wait=sb \
-@@ -35148,7 +35263,7 @@ check ovn-nbctl --wait=sb \
+@@ -35148,7 +35281,7 @@ check ovn-nbctl --wait=sb \
  check ovn-nbctl --wait=sb \
                  -- acl-add ls2 from-lport 100 'ip4' allow-stateless
  
@@ -1250,7 +1611,7 @@ index c947b2d30..7b8d09ac1 100644
  
  check ovn-nbctl --wait=sb acl-del ls1
  check ovn-nbctl --wait=sb acl-del ls2
-@@ -35159,7 +35274,7 @@ check ovn-nbctl --wait=sb \
+@@ -35159,7 +35292,7 @@ check ovn-nbctl --wait=sb \
  check ovn-nbctl --wait=sb \
                  -- acl-add ls2 from-lport 100 "udp" allow-related
  
@@ -1259,6 +1620,190 @@ index c947b2d30..7b8d09ac1 100644
  
  check ovn-nbctl --wait=sb acl-del ls1
  check ovn-nbctl --wait=sb acl-del ls2
+@@ -37634,9 +37767,9 @@ AT_CHECK([ovn-sbctl --db=ssl:127.0.0.1:$TCP_PORT \
+                     --ca-cert=$PKIDIR/testpki-cacert.pem \
+                     --ssl-ciphers='HIGH:!aNULL:!MD5:@SECLEVEL=1' \
+                     --ssl-protocols='TLSv1,TLSv1.1,TLSv1.2' \
+-                    chassis-add ch vxlan 1.2.4.8], [1], [ignore],
+-[ovn-sbctl: transaction error: {"details":"insert operation not allowed when database server is in read only mode","error":"not allowed"}
+-])
++                    chassis-add ch vxlan 1.2.4.8 2>&1 | grep 'transaction error]', [0], [dnl
++ovn-sbctl: transaction error: {"details":"insert operation not allowed when database server is in read only mode","error":"not allowed"}
++], [ignore])
+ 
+ OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+ AT_CLEANUP
+@@ -37894,3 +38027,170 @@ OVS_WAIT_FOR_OUTPUT([as hv1 ovs-ofctl dump-flows br-int table=0 |grep priority=1
+ OVN_CLEANUP([hv1])
+ AT_CLEANUP
+ ])
++
++dnl This test checks that the megaflows translated by ovs-vswitchd
++dnl don't match on IPv6 source and destination addresses for
++dnl simple switching.
++OVN_FOR_EACH_NORTHD([
++AT_SETUP([IPv6 switching - megaflow check for IPv6 src/dst matches])
++ovn_start
++
++check ovn-nbctl ls-add sw0
++
++check ovn-nbctl lsp-add sw0 vm0
++check ovn-nbctl lsp-set-addresses vm0 "f0:00:0f:01:02:03 10.0.0.3 1000::3"
++
++check ovn-nbctl lsp-add sw0 vm1
++check ovn-nbctl lsp-set-addresses vm1 "f0:00:0f:01:02:04 10.0.0.4 1000::4"
++
++check ovn-nbctl lr-add lr0
++check ovn-nbctl lrp-add lr0 lr0-sw0 fa:16:3e:00:00:01 10.0.0.1 1000::1/64
++check ovn-nbctl lsp-add sw0 sw0-lr0
++check ovn-nbctl lsp-set-type sw0-lr0 router
++check ovn-nbctl lsp-set-addresses sw0-lr0 router
++check ovn-nbctl --wait=hv lsp-set-options sw0-lr0 router-port=lr0-sw0
++
++net_add n1
++sim_add hv
++as hv
++check ovs-vsctl add-br br-phys
++ovn_attach n1 br-phys 192.168.0.1
++check ovs-vsctl add-port br-int vif1 -- \
++    set Interface vif1 external-ids:iface-id=vm0 \
++    options:tx_pcap=hv/vif1-tx.pcap \
++    options:rxq_pcap=hv/vif1-rx.pcap \
++    ofport-request=1
++check ovs-vsctl add-port br-int vif2 -- \
++    set Interface vif2  external-ids:iface-id=vm1 \
++    options:tx_pcap=hv/vif2-tx.pcap \
++    options:rxq_pcap=hv/vif2-rx.pcap \
++    ofport-request=2
++
++check ovn-nbctl --wait=sb sync
++wait_for_ports_up
++
++AS_BOX([No port security, to vm1])
++packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:04', src='f0:00:0f:01:02:03')/ \
++                  IPv6(dst='1000::4', src='1000::3')/ \
++                  UDP(sport=53, dport=4369)")
++
++as hv
++ovs-appctl ofproto/trace br-int in_port=1 $packet > vm0_ip6_ofproto_trace.txt
++ovs-appctl netdev-dummy/receive vif1 $packet
++
++AT_CAPTURE_FILE([vm0_ip6_ofproto_trace.txt])
++
++AT_CHECK([grep Megaflow vm0_ip6_ofproto_trace.txt | grep -e ipv6_src -e ipv6_dst -c], [1], [dnl
++0
++])
++
++dnl Make sure that the packet was received by vm1.  This ensures that the
++dnl packet was delivered as expected and the megaflow didn't have any matches
++dnl on IPv6 src or dst.
++
++echo $packet >> expected-vif2
++OVN_CHECK_PACKETS([hv/vif2-tx.pcap], [expected-vif2])
++
++AS_BOX([No port security, to vm0])
++packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:03', src='f0:00:0f:01:02:04')/ \
++                  IPv6(dst='1000::3', src='1000::4')/ \
++                  UDP(sport=53, dport=4369)")
++
++as hv
++ovs-appctl ofproto/trace br-int in_port=2 $packet > vm1_ip6_ofproto_trace.txt
++ovs-appctl netdev-dummy/receive vif2 $packet
++
++AT_CAPTURE_FILE([vm1_ip6_ofproto_trace.txt])
++
++AT_CHECK([grep Megaflow vm0_ip6_ofproto_trace.txt | grep -e ipv6_src -e ipv6_dst -c], [1], [dnl
++0
++])
++
++dnl Make sure that the packet was received by vm0.  This ensures that the
++dnl packet was delivered as expected and the megaflow didn't have any matches
++dnl on IPv6 src or dst.
++echo $packet >> expected-vif1
++OVN_CHECK_PACKETS([hv/vif1-tx.pcap], [expected-vif1])
++
++AS_BOX([With port security, to vm1])
++dnl Add port security to vm0.  The megaflow should now match on ipv6 src/dst.
++check ovn-nbctl lsp-set-port-security vm0 "f0:00:0f:01:02:03 10.0.0.3 1000::3"
++check ovn-nbctl --wait=hv sync
++
++packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:04', src='f0:00:0f:01:02:03')/ \
++                  IPv6(dst='1000::4', src='1000::3')/ \
++                  UDP(sport=53, dport=4369)")
++
++as hv
++ovs-appctl ofproto/trace br-int in_port=1 $packet > vm0_ip6_ofproto_trace.txt
++ovs-appctl netdev-dummy/receive vif1 $packet
++
++AT_CAPTURE_FILE([vm0_ip6_ofproto_trace.txt])
++
++AT_CHECK([grep Megaflow vm0_ip6_ofproto_trace.txt | grep -e ipv6_src -e ipv6_dst -c], [0], [dnl
++1
++])
++
++dnl Make sure that the packet was received by vm1.
++echo $packet >> expected-vif2
++OVN_CHECK_PACKETS([hv/vif2-tx.pcap], [expected-vif2])
++
++AS_BOX([Clear port security, to vm1])
++dnl Clear port security.
++check ovn-nbctl lsp-set-port-security vm0 ""
++check ovn-nbctl --wait=hv sync
++
++as hv
++ovs-appctl ofproto/trace br-int in_port=1 $packet > vm0_ip6_ofproto_trace.txt
++ovs-appctl netdev-dummy/receive vif1 $packet
++
++AT_CAPTURE_FILE([vm0_ip6_ofproto_trace.txt])
++
++AT_CHECK([grep Megaflow vm0_ip6_ofproto_trace.txt | grep -e ipv6_src -e ipv6_dst -c], [1], [dnl
++0
++])
++
++dnl Make sure that the packet was received by vm1.
++echo $packet >> expected-vif2
++OVN_CHECK_PACKETS([hv/vif2-tx.pcap], [expected-vif2])
++
++AS_BOX([With proxy arp/nd, to vm1])
++dnl Configure proxy arp/nd on the router port.  The megaflow should now match
++dnl on ipv6 src/dst.
++check ovn-nbctl --wait=hv lsp-set-options sw0-lr0 router-port=lr0-sw0 arp_proxy="2000::1/64"
++
++as hv
++ovs-appctl ofproto/trace br-int in_port=1 $packet > vm0_ip6_ofproto_trace.txt
++ovs-appctl netdev-dummy/receive vif1 $packet
++
++AT_CAPTURE_FILE([vm0_ip6_ofproto_trace.txt])
++
++AT_CHECK([grep Megaflow vm0_ip6_ofproto_trace.txt | grep -e ipv6_src -e ipv6_dst -c], [0], [dnl
++1
++])
++
++dnl Make sure that the packet was received by vm1.
++echo $packet >> expected-vif2
++OVN_CHECK_PACKETS([hv/vif2-tx.pcap], [expected-vif2])
++
++AS_BOX([With proxy arp/nd, to vm0])
++packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:03', src='f0:00:0f:01:02:04')/ \
++                  IPv6(dst='1000::3', src='1000::4')/ \
++                  UDP(sport=53, dport=4369)")
++
++as hv
++ovs-appctl ofproto/trace br-int in_port=2 $packet > vm1_ip6_ofproto_trace.txt
++ovs-appctl netdev-dummy/receive vif2 $packet
++
++AT_CAPTURE_FILE([vm1_ip6_ofproto_trace.txt])
++
++AT_CHECK([grep Megaflow vm0_ip6_ofproto_trace.txt | grep -e ipv6_src -e ipv6_dst -c], [0], [dnl
++1
++])
++
++dnl Make sure that the packet was received by vm0.
++echo $packet >> expected-vif1
++OVN_CHECK_PACKETS([hv/vif1-tx.pcap], [expected-vif1])
++
++AT_CLEANUP
++])
 diff --git a/tests/system-ovn.at b/tests/system-ovn.at
 index b5b68e32e..7d85dc4d4 100644
 --- a/tests/system-ovn.at
@@ -1313,6 +1858,177 @@ index b5b68e32e..7d85dc4d4 100644
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
+diff --git a/utilities/automake.mk b/utilities/automake.mk
+index de4f6efb5..03e9096fa 100644
+--- a/utilities/automake.mk
++++ b/utilities/automake.mk
+@@ -42,6 +42,7 @@ EXTRA_DIST += \
+     utilities/containers/Makefile \
+     utilities/containers/openbfdd.patch \
+     utilities/containers/py-requirements.txt \
++    utilities/containers/prepare.sh \
+     utilities/containers/fedora/Dockerfile \
+     utilities/containers/ubuntu/Dockerfile \
+     utilities/docker/Makefile \
+diff --git a/utilities/containers/fedora/Dockerfile b/utilities/containers/fedora/Dockerfile
+index 9b8386aae..9d06df99b 100755
+--- a/utilities/containers/fedora/Dockerfile
++++ b/utilities/containers/fedora/Dockerfile
+@@ -27,6 +27,7 @@ RUN dnf -y update \
+         libcap-ng-devel \
+         libtool \
+         net-tools \
++        nftables \
+         nmap-ncat \
+         openssl \
+         openssl-devel \
+@@ -44,41 +45,14 @@ RUN dnf -y update \
+     && \
+     dnf clean all
+ 
+-# Compile sparse from source
+-WORKDIR /workspace/sparse
+-
+-RUN git clone git://git.kernel.org/pub/scm/devel/sparse/sparse.git \
+-    /workspace/sparse \
+-    && \
+-    make -j4 PREFIX=/usr HAVE_LLVM= HAVE_SQLITE= install
+-
+-# Compile OpenBFDD from source
+-WORKDIR /workspace/OpenBFDD
++WORKDIR /workspace
+ 
+ COPY $CONTAINERS_PATH/openbfdd.patch /tmp/openbfdd.patch
+ 
+-RUN git clone https://github.com/dyninc/OpenBFDD.git \
+-    /workspace/OpenBFDD \
+-    && \
+-    git apply /tmp/openbfdd.patch \
+-    && \
+-    ./autogen.sh \
+-    && \
+-    ./configure --enable-silent-rules \
+-    && \
+-    make \
+-    && \
+-    make install
+-
+-WORKDIR /workspace
+-
+ COPY $CONTAINERS_PATH/py-requirements.txt /tmp/py-requirements.txt
+ 
+-# Update and install pip dependencies
+-RUN python3 -m pip install --upgrade pip \
+-    && \
+-    python3 -m pip install wheel \
+-    && \
+-    python3 -m pip install -r /tmp/py-requirements.txt
++COPY $CONTAINERS_PATH/prepare.sh /tmp/prepare.sh
++
++RUN /tmp/prepare.sh
+ 
+ CMD ["/usr/sbin/init"]
+diff --git a/utilities/containers/prepare.sh b/utilities/containers/prepare.sh
+new file mode 100755
+index 000000000..b3baa4345
+--- /dev/null
++++ b/utilities/containers/prepare.sh
+@@ -0,0 +1,37 @@
++#!/bin/bash -xe
++
++function compile_sparse()
++{
++    git clone git://git.kernel.org/pub/scm/devel/sparse/sparse.git \
++        /workspace/sparse
++
++    pushd sparse
++    make -j4 PREFIX=/usr HAVE_LLVM= HAVE_SQLITE= install
++    popd
++}
++
++function compile_openbfdd()
++{
++    git clone https://github.com/dyninc/OpenBFDD.git \
++        /workspace/OpenBFDD
++
++    pushd OpenBFDD
++    git apply /tmp/openbfdd.patch
++    ./autogen.sh
++    ./configure --enable-silent-rules
++    make
++    make install
++    popd
++}
++
++function install_python_dep()
++{
++    # The --user should be removed once pip can be upgraded on Ubuntu.
++    python3 -m pip install --user --upgrade pip
++    python3 -m pip install wheel
++    python3 -m pip install -r /tmp/py-requirements.txt
++}
++
++compile_sparse
++compile_openbfdd
++install_python_dep
+diff --git a/utilities/containers/ubuntu/Dockerfile b/utilities/containers/ubuntu/Dockerfile
+index ac1e6a5bf..61b4bec39 100755
+--- a/utilities/containers/ubuntu/Dockerfile
++++ b/utilities/containers/ubuntu/Dockerfile
+@@ -32,6 +32,7 @@ RUN apt update -y \
+         llvm-dev \
+         ncat \
+         net-tools \
++        nftables \
+         python3-dev \
+         python3-pip \
+         selinux-policy-dev \
+@@ -43,41 +44,14 @@ RUN apt update -y \
+     && \
+     apt clean
+ 
+-# Compile sparse from source
+-WORKDIR /workspace/sparse
+-
+-RUN git clone git://git.kernel.org/pub/scm/devel/sparse/sparse.git \
+-    /workspace/sparse \
+-    && \
+-    make -j4 PREFIX=/usr HAVE_LLVM= HAVE_SQLITE= install
+-
+-# Compile OpenBFDD from source
+-WORKDIR /workspace/OpenBFDD
++WORKDIR /workspace
+ 
+ COPY $CONTAINERS_PATH/openbfdd.patch /tmp/openbfdd.patch
+ 
+-RUN git clone https://github.com/dyninc/OpenBFDD.git \
+-    /workspace/OpenBFDD \
+-    && \
+-    git apply /tmp/openbfdd.patch \
+-    && \
+-    ./autogen.sh \
+-    && \
+-    ./configure --enable-silent-rules \
+-    && \
+-    make \
+-    && \
+-    make install
+-
+-WORKDIR /workspace
+-
+ COPY $CONTAINERS_PATH/py-requirements.txt /tmp/py-requirements.txt
+ 
+-# Update and install pip dependencies
+-RUN python3 -m pip install --upgrade pip \
+-    && \
+-    python3 -m pip install wheel \
+-    && \
+-    python3 -m pip install -r /tmp/py-requirements.txt
++COPY $CONTAINERS_PATH/prepare.sh /tmp/prepare.sh
++
++RUN /tmp/prepare.sh
+ 
+ CMD ["/sbin/init"]
 diff --git a/utilities/ovn-nbctl.8.xml b/utilities/ovn-nbctl.8.xml
 index ea2b201a5..340312b38 100644
 --- a/utilities/ovn-nbctl.8.xml
