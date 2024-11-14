@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.2
-Release: 32%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 34%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -127,7 +127,7 @@ BuildRequires: tcpdump
 BuildRequires: libcap-ng libcap-ng-devel
 %endif
 
-%if 0%{?rhel} == 9
+%if 0%{?rhel} >= 9
 BuildRequires: python3-scapy
 %endif
 
@@ -532,6 +532,14 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
+* Tue Aug 27 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-34
+- Documentation: Add inclusive-language documentation.
+[Upstream: 7195dcd1b280233a1d21d5c3c2b5484f7a2fb24f]
+
+* Mon Aug 19 2024 Numan Siddique <numans@ovn.org> - 24.03.2-33
+- tests: Skip "IPv6 switching - megaflow check" if scapy is not installed.
+[Upstream: 3c3109c7870e29bfa3cab482e4d59af2da0c1dbc]
+
 * Fri Aug 16 2024 Numan Siddique <numans@ovn.org> - 24.03.2-32
 - Reply only for the multicast ND solicitations.
 [Upstream: bc56bc6f70202b9a0dcc27f8a4721e4cfe21edc7]

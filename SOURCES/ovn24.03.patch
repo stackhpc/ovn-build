@@ -62,6 +62,105 @@ index bbc843940..b5eb4dc73 100644
  zhaojingjing                       zhao.jingjing1@zte.com.cn
  zhongbaisong                       zhongbaisong@huawei.com
  zhaozhanxu                         zhaozhanxu@163.com
+diff --git a/Documentation/automake.mk b/Documentation/automake.mk
+index b00876737..ac515716d 100644
+--- a/Documentation/automake.mk
++++ b/Documentation/automake.mk
+@@ -57,6 +57,7 @@ DOC_SOURCE = \
+ 	Documentation/internals/security.rst \
+ 	Documentation/internals/contributing/index.rst \
+ 	Documentation/internals/contributing/backporting-patches.rst \
++	Documentation/internals/contributing/inclusive-language.rst \
+ 	Documentation/internals/contributing/coding-style.rst \
+ 	Documentation/internals/contributing/documentation-style.rst \
+ 	Documentation/internals/contributing/libopenvswitch-abi.rst \
+diff --git a/Documentation/index.rst b/Documentation/index.rst
+index 730595c05..6dabd8a28 100644
+--- a/Documentation/index.rst
++++ b/Documentation/index.rst
+@@ -82,6 +82,7 @@ Learn more about the Open Virtual Network (OVN) project and about how you can co
+ 
+ - **Contributing:** :doc:`internals/contributing/submitting-patches` |
+   :doc:`internals/contributing/backporting-patches` |
++  :doc:`internals/contributing/inclusive-language` |
+   :doc:`internals/contributing/coding-style`
+ 
+ - **Maintaining:** :doc:`internals/maintainers` |
+diff --git a/Documentation/internals/contributing/inclusive-language.rst b/Documentation/internals/contributing/inclusive-language.rst
+new file mode 100644
+index 000000000..65e9c4fbd
+--- /dev/null
++++ b/Documentation/internals/contributing/inclusive-language.rst
+@@ -0,0 +1,57 @@
++..
++      Licensed under the Apache License, Version 2.0 (the "License"); you may
++      not use this file except in compliance with the License. You may obtain
++      a copy of the License at
++
++          http://www.apache.org/licenses/LICENSE-2.0
++
++      Unless required by applicable law or agreed to in writing, software
++      distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
++      WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
++      License for the specific language governing permissions and limitations
++      under the License.
++
++      Convention for heading levels in OVN documentation:
++
++      =======  Heading 0 (reserved for the title in a document)
++      -------  Heading 1
++      ~~~~~~~  Heading 2
++      +++++++  Heading 3
++      '''''''  Heading 4
++
++      Avoid deeper levels because they do not render well.
++
++==================
++Inclusive Language
++==================
++
++In order to help facilitate an inclusive environment in the OVN
++community we recognise the role of language in framing our
++communication with each other. It is important that terms that
++may exclude people through racial, cultural or other bias, are avoided
++as they may make people feel excluded.
++
++We recognise that this is subjective, and to some extent is a journey.
++But we also recognise that we cannot begin that journey without taking
++positive action. To this end OVN is adopting the practice of an
++inclusive word list, which helps to guide the use of language within
++the project.
++
++.. _word list:
++
++Word List
++---------
++
++The intent of this document is to formally document the acceptance of a
++inclusive word list by OVN.  Accordingly, this document specifies
++use of the use the `Inclusive Naming Word List
++<https://inclusivenaming.org/word-lists/>`__ v1.0 (the word list) for
++OVN.
++
++The adoption of the word list intended that this act as a guide for
++developers creating patches to the OVN repository, including both
++source code and documentation. And to aid maintainers in their role of
++shepherding changes into the repository.
++
++Further steps to align usage of language in OVN, including clarification
++of application of the word list, to new and existing work, may follow.
+diff --git a/Documentation/internals/contributing/index.rst b/Documentation/internals/contributing/index.rst
+index 77b52964b..4f09ad473 100644
+--- a/Documentation/internals/contributing/index.rst
++++ b/Documentation/internals/contributing/index.rst
+@@ -31,6 +31,7 @@ The below guides provide information on contributing to OVN itself.
+    :maxdepth: 2
+ 
+    submitting-patches
++   inclusive-language
+    backporting-patches
+    coding-style
+    documentation-style
 diff --git a/NEWS b/NEWS
 index 4d16d97ff..0fb8d24cc 100644
 --- a/NEWS
@@ -1143,7 +1242,7 @@ index 3576594e3..de56058f6 100644
  AT_SETUP([LR neighbor lookup and learning flows])
  ovn_start
 diff --git a/tests/ovn.at b/tests/ovn.at
-index c947b2d30..5d4495947 100644
+index c947b2d30..254e693b6 100644
 --- a/tests/ovn.at
 +++ b/tests/ovn.at
 @@ -1304,6 +1304,9 @@ ct_commit { ct_label=0x181716151413121110090807060504030201; };
@@ -1633,7 +1732,7 @@ index c947b2d30..5d4495947 100644
  
  OVS_APP_EXIT_AND_WAIT([ovsdb-server])
  AT_CLEANUP
-@@ -37894,3 +38027,170 @@ OVS_WAIT_FOR_OUTPUT([as hv1 ovs-ofctl dump-flows br-int table=0 |grep priority=1
+@@ -37894,3 +38027,171 @@ OVS_WAIT_FOR_OUTPUT([as hv1 ovs-ofctl dump-flows br-int table=0 |grep priority=1
  OVN_CLEANUP([hv1])
  AT_CLEANUP
  ])
@@ -1643,6 +1742,7 @@ index c947b2d30..5d4495947 100644
 +dnl simple switching.
 +OVN_FOR_EACH_NORTHD([
 +AT_SETUP([IPv6 switching - megaflow check for IPv6 src/dst matches])
++AT_SKIP_IF([test $HAVE_SCAPY = no])
 +ovn_start
 +
 +check ovn-nbctl ls-add sw0
