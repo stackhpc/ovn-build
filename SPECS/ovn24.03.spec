@@ -50,8 +50,8 @@ Name: %{pkgname}
 Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
-Version: 24.03.2
-Release: 34%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Version: 24.03.5
+Release: 14%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -59,13 +59,13 @@ Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 # lib/sflow*.[ch] files are SISSL
 License: ASL 2.0 and LGPLv2+ and SISSL
 
-%define ovncommit 41836afafd99d579bb277f638a31bffd5cf3efa3
+%define ovncommit f5a4704f9be07f7c29e45bb15e7e71126c6fea4a
 
 # Always pull an upstream release, since this is what we rebase to.
 Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{version}.tar.gz
 
-%define ovscommit f19448b8618967a108ec6f34713dd811ce1d1334
-%define ovsshortcommit f19448b
+%define ovscommit f078a551f99726e146d423944c8e4ae3633603eb
+%define ovsshortcommit f078a55
 
 Source10: https://github.com/openvswitch/ovs/archive/%{ovscommit}.tar.gz#/openvswitch-%{ovsshortcommit}.tar.gz
 %define ovsdir ovs-%{ovscommit}
@@ -532,127 +532,47 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
-* Tue Aug 27 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-34
-- Documentation: Add inclusive-language documentation.
-[Upstream: 7195dcd1b280233a1d21d5c3c2b5484f7a2fb24f]
+* Wed Feb 05 2025 Ales Musil <amusil@redhat.com> - 24.03.5-14
+- controller: Omit alert for FDB and MAC binding timestamp.
+[Upstream: 5ea9b593cd282c39853ef75caaeeaf84491accef]
 
-* Mon Aug 19 2024 Numan Siddique <numans@ovn.org> - 24.03.2-33
-- tests: Skip "IPv6 switching - megaflow check" if scapy is not installed.
-[Upstream: 3c3109c7870e29bfa3cab482e4d59af2da0c1dbc]
+* Tue Feb 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.5-13
+- mac-cache: Fix expiration of active FDB entry due to skipped update. (#FDP-1132)
+[Upstream: e036f8d41d24091237f6439e6358a3e47682e6ae]
 
-* Fri Aug 16 2024 Numan Siddique <numans@ovn.org> - 24.03.2-32
-- Reply only for the multicast ND solicitations.
-[Upstream: bc56bc6f70202b9a0dcc27f8a4721e4cfe21edc7]
+* Tue Feb 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.5-12
+- mac-cache: Fix expiration of active MAC binding due to skipped update. (#FDP-1130)
+[Upstream: b5f1b884fcc68a9b5854b15de0da3ed997a8a747]
 
-* Fri Aug 16 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-31
-- Prepare for 24.03.4.
-[Upstream: 1b65173ef13bc738783b9f68058773d4a2aa98bf]
+* Tue Feb 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.5-11
+- mac-cache: Fix MAC binding entry lookup for timestamp refresh. (#FDP-1131)
+[Upstream: 0870ebd44dfce38f86404778cc6bee5df40cdf5c]
 
-* Fri Aug 16 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-30
-- Set release date for 24.03.3.
-[Upstream: 459a3bab4c4a11b904aa3c37015372d34e1e1209]
+* Tue Feb 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.5-10
+- tests: Fix use of bash arrays in MAC binding tests.
+[Upstream: b0d75de69887346f8a139520ec9ef0a3b7d41108]
 
-* Wed Aug 14 2024 Xavier Simonart <xsimonar@redhat.com> - 24.03.2-29
-- ci: Add nftables to containers.
-[Upstream: 0690deee62d9ea271716ad87aadc33f68bec7c65]
+* Tue Feb 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.5-9
+- tests: Fix incorrect invocations of send_garp.
+[Upstream: ba62948045ff772dcba85b13a5894c0d7b4eba78]
 
-* Wed Aug 14 2024 Xavier Simonart <xsimonar@redhat.com> - 24.03.2-28
-- tests: Skip some tests if nft not installed.
-[Upstream: fe3d7b202434fa401514504cdb4608259681c0f6]
+* Wed Jan 29 2025 Ales Musil <amusil@redhat.com> - 24.03.5-8
+- northd: Do not attempt to install LS flows for LR IGMP group.
+[Upstream: c60440befc464a0ec786345806f216a841476a19]
 
-* Mon Aug 12 2024 Rosemarie O'Riorden <roriorden@redhat.com> - 24.03.2-27
-- northd: Clean up SB MAC bindings for deleted ports.
-[Upstream: 9d1b50e8ab75e1a730905d1d99e82652c3901b36]
+* Wed Jan 29 2025 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.5-7
+- northd: Trigger a full recompute if lb neigh_mode option is updated. (#FDP-1054)
+[Upstream: 784be94567a88cc055855446aab14b046dfccb15]
 
-* Mon Aug 12 2024 Ales Musil <amusil@redhat.com> - 24.03.2-26
-- controller: Make sure the meter and group tables are initialized.
-[Upstream: b01f3b59c6da0da0eea84a8afb346964ae3b7809]
+* Fri Jan 24 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.5-6
+- controller: Fix IPv6 dp flow explosion by setting flow table prefixes. (#FDP-1024)
+[Upstream: 5d045ce28525388fa2c9c6fdb189e7289ccc6768]
 
-* Thu Aug 08 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-25
-- ci: ovn-kubernetes: Move to stable release-1.0 branch.
-[Upstream: b4c94391b2685266220ef9b263220c0a373ff41c]
+* Thu Jan 23 2025 Frode Nordahl <fnordahl@ubuntu.com> - 24.03.5-5
+- ic: Fix NULL ptr deref on log of duplicate routes.
+[Upstream: a2f001eba006f08be7974589fb1d5616b07588fd]
 
-* Thu Aug 08 2024 Ilya Maximets <i.maximets@ovn.org> - 24.03.2-24
-- logical-fields: Add missing multicast matches for MLD and IGMP.
-[Upstream: 18d66c8531fcb7bd2ee9abbaa99a7d6c42639ed1]
-
-* Tue Jul 30 2024 Han Zhou <hzhou@ovn.org> - 24.03.2-23
-- debian: Fix upper case package name in changlog.
-[Upstream: 2084f06aafdac5589b7bb67ebaeb3fca4c9b7d5f]
-
-* Mon Jul 22 2024 zhangqiang45 <zhangqiang45@lenovo.com> - 24.03.2-22
-- northd: Fix issues for Forwarding_Group.
-[Upstream: fb434c5b9c86c5c0a6c32385761f6ef136dff0a8]
-
-* Fri Jul 19 2024 Vladislav Odintsov <odivlad@gmail.com> - 24.03.2-21
-- tests: Fix ssl-ciphers RO sb test with old openssl.
-[Upstream: d2faeb5efff1a3177e42d4df4a009807e8cd5dd4]
-
-* Tue Jun 25 2024 Ales Musil <amusil@redhat.com> - 24.03.2-20
-- ci: Move common build steps into script.
-[Upstream: 2e11c9a65130baa944a868ea920ec68ff54412b0]
-
-* Tue Jun 18 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-19
-- tests: ic: Add IP multicast test that simulates the ovn-k8s use case.
-[Upstream: 50c329f561eb4c6b912dd9a1c200872465a2e3dc]
-
-* Tue Jun 18 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-18
-- Revert "northd: Don't skip transit switch LSP when creating mcast groups."
-[Upstream: cdeb6c9f3e65c83584599f60956dc865792b8121]
-
-* Tue Jun 18 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-17
-- Revert "ovn-ic: Avoid igmp/mld traffic flooding."
-[Upstream: c00a2c6254df025452e360b1c71a43f79f9f4d1a]
-
-* Tue Jun 18 2024 Dumitru Ceara <dceara@redhat.com> - 24.03.2-16
-- Revert "IC: Tansit switch don't flood mcast traffic to router ports if matches igmp group."
-[Upstream: 4d47713d8b229d53243fd46e5a809567ed8dc692]
-
-* Mon Jun 17 2024 Shibir Basak <shibir.basak@nutanix.com> - 24.03.2-15
-- controller: Send RARP/GARP for VIF post link state is up.
-[Upstream: 02cda45a02dcc4e88a2608aee5c6a1f4e50f2cba]
-
-* Wed Jun 12 2024 Vladislav Odintsov <odivlad@gmail.com> - 24.03.2-14
-- controller: Store src_mac, src_ip in svc_monitor struct.
-[Upstream: bcbd09724f441b6df7412da8c3d53b9d7ba72572]
-
-* Tue Jun 11 2024 Naveen Yerramneni <naveen.yerramneni@nutanix.com> - 24.03.2-13
-- controller: Fix issue with ct_commit encode.
-[Upstream: a8a4b87e1873e67c4e78ce7857e352059bc2aa5e]
-
-* Fri Jun 07 2024 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.2-12
-- northd: Skip arp-proxy flows if the lsp is a router port.
-[Upstream: 57e8d78f5beeefcd99297ae87c6505fc20f7b45a]
-
-* Wed Jun 05 2024 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.2-11
-- ovn-nbctl: Show bfd option man for lr-policy-add command.
-[Upstream: b1c55c42f8961d88b7a0f9a8b7e6d46a0fcf81c3]
-
-* Wed Jun 05 2024 Ales Musil <amusil@redhat.com> - 24.03.2-10
-- ovn-controller: Initialize bitmap to zero.
-[Upstream: 233b105b20a389b984365521ed5c67ca0ec1ae2d]
-
-* Wed May 29 2024 Xavier Simonart <xsimonar@redhat.com> - 24.03.2-9
-- lflow: Add missing sample flow.
-[Upstream: ffe02579c71489e3aa0858ab0ff09702863f6f4b]
-
-* Tue May 21 2024 Indrajitt Valsaraj <indrajitt.valsaraj@nutanix.com> - 24.03.2-8
-- northd: Fix an issue wrt mac binding aging.
-[Upstream: ff11ab416c230ee36c18b52d86a505a27cb932c8]
-
-* Tue May 21 2024 Ales Musil <amusil@redhat.com> - 24.03.2-7
-- ci: Pin Fedora version for the build-rpm job.
-[Upstream: 7b65a65402963caf1cf7ff1b2152290f02277750]
-
-* Wed May 15 2024 Ales Musil <amusil@redhat.com> - 24.03.2-6
-- controller: Avoid use after free in LB I-P.
-[Upstream: 0440a083d2bb024fe3a8263f72c7c749cc9fae5a]
-
-* Tue May 14 2024 Xavier Simonart <xsimonar@redhat.com> - 24.03.2-5
-- northd, ic: Fix handling of ovn-appctl resume.
-[Upstream: bc2af6ab81b47cb5303efb072f56dfe3ec149649]
-
-* Fri May 10 2024 Mark Michelson <mmichels@redhat.com> - 24.03.2-4
-- Prepare for 24.03.3.
-[Upstream: 9c8264e765548f7c2f2e15af217c84abc664b932]
+* Tue Jan 21 2025 Mark Michelson <mmichels@redhat.com> - 24.03.5-4
+- Prepare for 24.03.6.
+[Upstream: 7dd5d8f82030e4927fca24d99d2b46816b6de4dc]
 
