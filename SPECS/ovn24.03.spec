@@ -68,6 +68,13 @@ Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{versio
 %define ovsshortcommit d8b9702
 
 Source10: https://github.com/openvswitch/ovs/archive/%{ovscommit}.tar.gz#/openvswitch-%{ovsshortcommit}.tar.gz
+Source11: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/ovn24.03.patch
+Source12: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/x86_64-native-linuxapp-gcc-config
+Source13: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/ppc_64-power8-linuxapp-gcc-config
+Source14: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/arm64-armv8a-linuxapp-gcc-config
+Source15: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/set_config.sh
+Source16: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/gen_config_group.sh
+Source17: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/configlib.sh
 %define ovsdir ovs-%{ovscommit}
 
 %define docutilsver 0.12
