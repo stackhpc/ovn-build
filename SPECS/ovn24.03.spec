@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.6
-Release: 22%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 48%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -532,6 +532,110 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
+* Mon Sep 29 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-48
+- northd: Fix receiving NA on non resident chassis. (#FDP-1567 FDP-1728)
+[Upstream: 2b5e2c787bbc9e3a2e965b03e368a5e443d11727]
+
+* Mon Sep 29 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-47
+- tests: Also remove patch ports when cleaning up resources.
+[Upstream: 2d516d9f43c0f3152a21304debdca09aa98bf096]
+
+* Wed Sep 24 2025 Ales Musil <amusil@redhat.com> - 24.03.6-46
+- controller: Do not assign pointer to bool.
+[Upstream: 2318e8f111bff69768ccc2c145d52ef196b63053]
+
+* Mon Sep 22 2025 Ales Musil <amusil@redhat.com> - 24.03.6-45
+- northd: Prevent ovn-nbctl --wait=sb from returning early. (#FDP-1712)
+[Upstream: cfdd380a025edbfd947c07844684fb6f7ab81c63]
+
+* Mon Sep 22 2025 Mark Michelson <mmichels@redhat.com> - 24.03.6-44
+- northd: Be more selective with installation of neighbor flows. (#FDP-1454)
+[Upstream: 532f857e2ebda0fc5af21d1647e7036d27f38447]
+
+* Tue Sep 16 2025 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.6-43
+- tests: Use localhost when setting "wrong" ovn-remote.
+[Upstream: f27dfe1539eb00d1dca2fefa7d4cd5e313064dec]
+
+* Tue Sep 16 2025 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.6-42
+- tests: Expect musl error string for EIO errno.
+[Upstream: 62f62f0195fb1b519276580cfcd1d25caf269824]
+
+* Tue Sep 16 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-41
+- controller: Avoid IPv6 Mac_Binding related transaction errors. (#FDP-1567)
+[Upstream: 93be64d9e95f1c7c8a0ee82292cc7078772df270]
+
+* Wed Sep 10 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-40
+- nit: tests: Remove unused arguments in send_icmp6_packet.
+[Upstream: 76d7402ab418480c8ddd968b868bb44f8def451d]
+
+* Wed Sep 10 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-39
+- tests: Avoid code duplication by moving send_na to ovn_macros.
+[Upstream: 381ed90502eabae3833c4ad8dccb8ffb473e7932]
+
+* Mon Sep 08 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-38
+- controller: Add missing monitor conditions.
+[Upstream: 363c1b36cadb5c8c45fb4a644342cc831d8cdb79]
+
+* Mon Sep 08 2025 Lucas Vargas Dias <lucas.vdias@luizalabs.com> - 24.03.6-37
+- ic: Fix loop disable/enable logical router.
+[Upstream: 0e1cfa6a330737f8719b470d2ec8e35302c4294a]
+
+* Fri Sep 05 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.6-36
+- ovn-sandbox: Fix typo that doesn't allow starting a sandbox without IC.
+[Upstream: 32a59f1d7a682c04d30916c7bef3286ecbd7e1f3]
+
+* Tue Sep 02 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.6-35
+- northd: Always prefer bound ovn_port versions when available.
+[Upstream: de4a70eb356342a3d4e37588652b4f0af7ca9eff]
+
+* Tue Sep 02 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.6-34
+- northd: Omit alert for write-only SB.Static_Mac_Binding table.
+[Upstream: b2c8f560cb73821151b3ef3d090f93dac2a01865]
+
+* Mon Sep 01 2025 Felix Huettner <felix.huettner@stackit.cloud> - 24.03.6-33
+- mac-cache: Handle never hit flows correctly.
+[Upstream: 1544c04d109bec443b75da89f72952d43a0be5d3]
+
+* Mon Sep 01 2025 Ales Musil <amusil@redhat.com> - 24.03.6-32
+- northd: Update the SB datapath reference for Static MAC binding.
+[Upstream: be2ee65ac17a4b7fd8c227f887ec05ccf8d4ac5a]
+
+* Fri Aug 29 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-31
+- multinode: Check proper GARP generation.
+[Upstream: 5771eb5181b7f39f89f372caa610bea454b479be]
+
+* Fri Aug 29 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-30
+- controller: Fix missing garp while gw are fighting. (#FDP-1418)
+[Upstream: 37992e62f56f7197700c9fcbaef866af51525630]
+
+* Fri Aug 29 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-29
+- controller: Do not postpone claim for highest priority chassis.
+[Upstream: 20ce2103679a14bc79693fcf077a78bd9d5c585e]
+
+* Fri Aug 29 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-28
+- multinode: Fix backport of multinode tests.
+[Upstream: 32a74b79237ecbd5dc71f75d3f97d4bad9c6ad49]
+
+* Thu Aug 28 2025 Ales Musil <amusil@redhat.com> - 24.03.6-27
+- northd: Remove stale Static MAC Bindings during SB datapath re-creation. (#FDP-1623)
+[Upstream: 64ca4fdf72cb486fa38f21efe910fd5e787ed689]
+
+* Mon Aug 25 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-26
+- tests: Fix flaky "pod to pod with localnet_learn_fdb".
+[Upstream: 584eae5e12fdca6affb562ad5b8b6cd5ae2a5a09]
+
+* Mon Aug 25 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-25
+- controller: Fix potentially missing vif entries in fdb. (#FDP-1341)
+[Upstream: 8495cb9528d60b3cb25fcaead0eb9a41891eaa2a]
+
+* Mon Aug 25 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.6-24
+- controller: Update next_cfg when transaction succeeded.
+[Upstream: 1f49045771adb9706ba2397448447a5ae784ed33]
+
+* Fri Aug 15 2025 Rosemarie O'Riorden <rosemarie@redhat.com> - 24.03.6-23
+- northd: Update virtual port on parent port update. (#FDP-710)
+[Upstream: a87fc827380efe3617b7de3470a3f76724f62aea]
+
 * Mon Jul 28 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.6-22
 - logical-fields: Fix IPv6 dp flow explosion caused by ip6.mcast_rsvd. (#FDP-1557)
 [Upstream: d162828a38e343f047252f036e5cb237835b4294]
