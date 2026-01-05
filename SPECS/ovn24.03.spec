@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.7
-Release: 7%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 31%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -64,8 +64,8 @@ License: ASL 2.0 and LGPLv2+ and SISSL
 # Always pull an upstream release, since this is what we rebase to.
 Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{version}.tar.gz
 
-%define ovscommit f1bc9af9627e97b8361dd32834068a8b7f2e0d17
-%define ovsshortcommit f1bc9af
+%define ovscommit 785a89b48db6803a2ce44e28e76d8a0025be1803
+%define ovsshortcommit 785a89b
 
 Source10: https://github.com/openvswitch/ovs/archive/%{ovscommit}.tar.gz#/openvswitch-%{ovsshortcommit}.tar.gz
 %define ovsdir ovs-%{ovscommit}
@@ -231,6 +231,7 @@ for service in ovn-controller ovn-controller-vtep ovn-northd; do
                         rhel/usr_lib_systemd_system_${service}.service \
                         $RPM_BUILD_ROOT%{_unitdir}/${service}.service
 done
+
 
 install -d -m 0755 $RPM_BUILD_ROOT/%{_sharedstatedir}/ovn
 
@@ -532,15 +533,95 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
-* Thu Nov 20 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-7
+* Thu Dec 18 2025 Xie Liu <liushyshy@gmail.com> - 24.03.7-31
+- tests: Fix ACL direction consistency.
+[Upstream: 9e3942ed49eea8518b01324e2ef4cb546d4d88d8]
+
+* Thu Dec 18 2025 Xie Liu <liushyshy@gmail.com> - 24.03.7-30
+- controller: CT zone allocation for DGP LSPs enabled ACL.
+[Upstream: 73327991d684534ee964446cd9a6d7a888a93fd5]
+
+* Tue Dec 16 2025 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-29
+- tests: Ignore AT_CHECK stderr for `grep ... | grep -q`.
+[Upstream: b867e7111b4e0a75fd16f2ff5f58debfff50a2b8]
+
+* Tue Dec 16 2025 Frode Nordahl <fnordahl@ubuntu.com> - 24.03.7-28
+- tests: Fix test for tc rounding behavior change.
+[Upstream: ced8157fc9a6a98de44657c89cf42402ae5bf9ae]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-27
+- tests/ovn-ic: Add missing OVN_CLEANUP_IC call.
+[Upstream: a9d2ec49dbccd14432f984784ed1e2709f02461b]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-26
+- tests/ovn-controller: Add missing cleanup.
+[Upstream: 91e14feec77d03368207c99f384d37d23003b1aa]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-25
+- tests/ovn: Add missing partial cleanups.
+[Upstream: a238fd1deae94a89b19abfdbca62af68cd4dcf6d]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-24
+- tests/ovn: Add missing OVN_CLEANUP calls.
+[Upstream: 91080a0a5487232819b7752d799ebf23594fab7d]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-23
+- tests: Add OVN_CLEANUP_DBS and use it in tests that already stopped northd.
+[Upstream: 369276c1c3959d8646e120cd6a620c30b53f2420]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-22
+- tests/ovn-controller-vtep: Remove unused test net.
+[Upstream: 02ead19698d92b0bf555018050a491ee09bc9f48]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-21
+- tests/ovn-controller-vtep: Add missing OVN_CONTROLLER_VTEP_STOP calls.
+[Upstream: de5cac684af53038c575da3ec5f90975a7ee8c1c]
+
+* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-20
+- tests: Add missing OVN_CLEANUP_NORTHD calls.
+[Upstream: 64dfd08c8c1ed5c6f0deffb97a2198482a91374f]
+
+* Mon Dec 08 2025 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-19
+- tests: Require scapy for 'IP packet buffering'.
+[Upstream: 9331d8076a2de2afc0e2dbc19043ca5de37ac510]
+
+* Thu Dec 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.7-18
+- ovs: Bump to include fix for non-existent rows in idl uuid lookup. (#FDP-2807)
+[Upstream: 18c635009943866ed39dc82b06a4f636e5d0f389]
+
+* Thu Dec 04 2025 Ales Musil <amusil@redhat.com> - 24.03.7-17
+- northd: Skip transient SB datapath IDL records. (#FDP-2784)
+[Upstream: db72a15e55fe1b7b672fdf35aca8506eb1c20144]
+
+* Thu Dec 04 2025 Ales Musil <amusil@redhat.com> - 24.03.7-16
+- pinctrl: Make sure we can learn IGMP groups only on switches.
+[Upstream: 423485a3614fc013233218fe36442089c02d1651]
+
+* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-15
+- pinctrl: Fix Service_Monitor reported online very slowly. (#FDP-2649)
+[Upstream: 80aede654f7226ccfebcbcd93c12ad05852639ee]
+
+* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-14
+- pinctrl: Fix Service_Monitor status change not updated.
+[Upstream: f458fa380b6202dea2cc44f870733b05947bca5b]
+
+* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-13
+- pinctrl: Speed up Service_Monitor updates.
+[Upstream: 3ecaa269f2468c56eb0ed4227f934a5484162732]
+
+* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-12
+- pinctrl: Avoid waking-up pinctrl thread too often.
+[Upstream: e33d4450afbc764619ab8dc3ea2480341ab43878]
+
+* Thu Nov 20 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-11
 - tests: Ensure all central components stop at the end of the test.
 [Upstream: b8c618a89d8fb6b6ad993d5e1cf1d4c602807206]
 
-* Thu Nov 20 2025 Ales Musil <amusil@redhat.com> - 24.03.7-6
+* Thu Nov 20 2025 Ales Musil <amusil@redhat.com> - 24.03.7-10
 - pinctrl: Prevent leak of mac_binding and fdb struct.
 [Upstream: 3169ba2204f3049af5162e8a2bc87b13dc6494e4]
 
-* Wed Nov 19 2025 Mark Michelson <mmichels@redhat.com> - 24.03.7-5
+* Wed Nov 19 2025 Mark Michelson <mmichels@redhat.com> - 24.03.7-9
 - Prepare for 24.03.8.
 [Upstream: f3c31c02b44cf0b4cbb017e1ce1cd800d9fe8d99]
 

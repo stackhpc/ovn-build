@@ -22,11 +22,183 @@ index 7577d5700..a28106ca0 100644
  AC_CONFIG_MACRO_DIR([m4])
  AC_CONFIG_AUX_DIR([build-aux])
  AC_CONFIG_HEADERS([config.h])
+diff --git a/controller/binding.c b/controller/binding.c
+index b0ca6b638..a4e05f865 100644
+--- a/controller/binding.c
++++ b/controller/binding.c
+@@ -782,6 +782,16 @@ update_active_pb_ras_pd(const struct sbrec_port_binding *pb,
+     }
+ }
+ 
++/* Check the patch port needs CT zone based on enable_router_port_acl.
++ * Returns true if the patch port should be added to local_lports for
++ * CT zone allocation.
++ */
++static bool
++patch_port_needs_ct_zone(const struct sbrec_port_binding *pb)
++{
++    return smap_get_bool(&pb->options, "enable_router_port_acl", false);
++}
++
+ static struct local_binding *local_binding_create(
+     const char *name, const struct ovsrec_interface *);
+ static void local_binding_add(struct shash *local_bindings,
+@@ -2109,6 +2119,11 @@ binding_run(struct binding_ctx_in *b_ctx_in, struct binding_ctx_out *b_ctx_out)
+         switch (lport_type) {
+         case LP_PATCH:
+             update_related_lport(pb, b_ctx_out);
++            /* Check if this patch port needs CT zone allocation and add it
++             * to local_lports if required. */
++            if (patch_port_needs_ct_zone(pb)) {
++                update_local_lports(pb->logical_port, b_ctx_out);
++            }
+             break;
+         case LP_VTEP:
+             update_related_lport(pb, b_ctx_out);
+@@ -2970,6 +2985,20 @@ handle_updated_port(struct binding_ctx_in *b_ctx_in,
+     case LP_PATCH:
+         update_related_lport(pb, b_ctx_out);
+         consider_patch_port_for_local_datapaths(pb, b_ctx_in, b_ctx_out);
++        /* Handle dynamic changes to enable_router_port_acl option.
++         * Check CT zone requirement if options updated. */
++        if (sbrec_port_binding_is_updated(pb,
++                                          SBREC_PORT_BINDING_COL_OPTIONS)) {
++            tracked_datapath_lport_add(pb, TRACKED_RESOURCE_UPDATED,
++                b_ctx_out->tracked_dp_bindings);
++            if (patch_port_needs_ct_zone(pb)) {
++                update_local_lports(pb->logical_port, b_ctx_out);
++            } else {
++                /* Option was removed, remove from local_lports to
++                 * release CT zone */
++                remove_local_lports(pb->logical_port, b_ctx_out);
++            }
++        }
+         break;
+ 
+     case LP_VTEP:
+diff --git a/controller/ovn-controller.c b/controller/ovn-controller.c
+index 72f80d28e..a443e867a 100644
+--- a/controller/ovn-controller.c
++++ b/controller/ovn-controller.c
+@@ -2730,9 +2730,29 @@ ct_zones_runtime_data_handler(struct engine_node *node, void *data)
+             if (strcmp(t_lport->pb->type, "")
+                 && strcmp(t_lport->pb->type, "localport")
+                 && strcmp(t_lport->pb->type, "l3gateway")
+-                && strcmp(t_lport->pb->type, "localnet")) {
++                && strcmp(t_lport->pb->type, "localnet")
++                && strcmp(t_lport->pb->type, "patch")) {
+                 /* We allocate zone-id's only to VIF, localport, l3gateway,
+-                 * and localnet lports. */
++                 * localnet and patch (enabled ACL) lports. */
++                continue;
++            }
++
++            /* For patch ports without ACL flag, delete the ct_zone. */
++            if (!strcmp(t_lport->pb->type, "patch") &&
++                !smap_get_bool(&t_lport->pb->options,
++                               "enable_router_port_acl", false)) {
++                struct simap_node *ct_zone =
++                simap_find(&ct_zones_data->current,
++                            t_lport->pb->logical_port);
++                if (ct_zone) {
++                    add_pending_ct_zone_entry(
++                        &ct_zones_data->pending, CT_ZONE_OF_QUEUED,
++                        ct_zone->data, false, ct_zone->name);
++
++                    bitmap_set0(ct_zones_data->bitmap, ct_zone->data);
++                    simap_delete(&ct_zones_data->current, ct_zone);
++                    updated = true;
++                }
+                 continue;
+             }
+ 
 diff --git a/controller/pinctrl.c b/controller/pinctrl.c
-index 3774544a8..455bdcaa2 100644
+index 3774544a8..421ab24e6 100644
 --- a/controller/pinctrl.c
 +++ b/controller/pinctrl.c
-@@ -4252,6 +4252,7 @@ init_put_mac_bindings(void)
+@@ -165,6 +165,7 @@ VLOG_DEFINE_THIS_MODULE(pinctrl);
+ static struct ovs_mutex pinctrl_mutex = OVS_MUTEX_INITIALIZER;
+ static struct seq *pinctrl_handler_seq;
+ static struct seq *pinctrl_main_seq;
++static uint64_t main_seq;
+ 
+ #define GARP_RARP_DEF_MAX_TIMEOUT    16000
+ static long long int garp_rarp_max_timeout = GARP_RARP_DEF_MAX_TIMEOUT;
+@@ -209,7 +210,7 @@ static void run_put_mac_bindings(
+     struct ovsdb_idl_index *sbrec_port_binding_by_key,
+     struct ovsdb_idl_index *sbrec_mac_binding_by_lport_ip)
+     OVS_REQUIRES(pinctrl_mutex);
+-static void wait_put_mac_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn);
++static void wait_put_mac_bindings(void);
+ static void send_mac_binding_buffered_pkts(struct rconn *swconn)
+     OVS_REQUIRES(pinctrl_mutex);
+ 
+@@ -271,7 +272,7 @@ static void pinctrl_handle_put_icmp_frag_mtu(struct rconn *swconn,
+ static void
+ pinctrl_handle_event(struct ofpbuf *userdata)
+     OVS_REQUIRES(pinctrl_mutex);
+-static void wait_controller_event(struct ovsdb_idl_txn *ovnsb_idl_txn);
++static void wait_controller_event(void);
+ static void init_ipv6_ras(void);
+ static void destroy_ipv6_ras(void);
+ static void ipv6_ra_wait(long long int send_ipv6_ra_time);
+@@ -318,7 +319,7 @@ static void run_put_vport_bindings(
+     struct ovsdb_idl_index *sbrec_port_binding_by_key,
+     const struct sbrec_chassis *chassis, int64_t cur_cfg)
+     OVS_REQUIRES(pinctrl_mutex);
+-static void wait_put_vport_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn);
++static void wait_put_vport_bindings(void);
+ static void pinctrl_handle_bind_vport(const struct flow *md,
+                                       struct ofpbuf *userdata);
+ static void pinctrl_handle_svc_check(struct rconn *swconn,
+@@ -391,7 +392,7 @@ static void run_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn,
+                         struct ovsdb_idl_index *sbrec_fdb_by_dp_key_mac,
+                         uint64_t cur_cfg)
+                         OVS_REQUIRES(pinctrl_mutex);
+-static void wait_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn);
++static void wait_put_fdbs(void);
+ static void pinctrl_handle_put_fdb(const struct flow *md,
+                                    const struct flow *headers)
+                                    OVS_REQUIRES(pinctrl_mutex);
+@@ -571,6 +572,7 @@ pinctrl_init(void)
+     pinctrl.mac_binding_can_timestamp = false;
+     pinctrl_handler_seq = seq_create();
+     pinctrl_main_seq = seq_create();
++    main_seq = seq_read(pinctrl_main_seq);
+ 
+     latch_init(&pinctrl.pinctrl_thread_exit);
+     pinctrl.pinctrl_thread = ovs_thread_create("ovn_pinctrl", pinctrl_handler,
+@@ -3641,6 +3643,9 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
+             struct if_status_mgr *mgr)
+ {
+     ovs_mutex_lock(&pinctrl_mutex);
++
++    main_seq = seq_read(pinctrl_main_seq);
++
+     run_put_mac_bindings(ovnsb_idl_txn, sbrec_datapath_binding_by_key,
+                          sbrec_port_binding_by_key,
+                          sbrec_mac_binding_by_lport_ip);
+@@ -4180,12 +4185,13 @@ void
+ pinctrl_wait(struct ovsdb_idl_txn *ovnsb_idl_txn)
+ {
+     ovs_mutex_lock(&pinctrl_mutex);
+-    wait_put_mac_bindings(ovnsb_idl_txn);
+-    wait_controller_event(ovnsb_idl_txn);
+-    wait_put_vport_bindings(ovnsb_idl_txn);
+-    int64_t new_seq = seq_read(pinctrl_main_seq);
+-    seq_wait(pinctrl_main_seq, new_seq);
+-    wait_put_fdbs(ovnsb_idl_txn);
++    if (ovnsb_idl_txn) {
++        wait_put_mac_bindings();
++        wait_controller_event();
++        wait_put_vport_bindings();
++        wait_put_fdbs();
++        seq_wait(pinctrl_main_seq, main_seq);
++    }
+     wait_activated_ports();
+     ovs_mutex_unlock(&pinctrl_mutex);
+ }
+@@ -4252,6 +4258,7 @@ init_put_mac_bindings(void)
  static void
  destroy_put_mac_bindings(void)
  {
@@ -34,12 +206,158 @@ index 3774544a8..455bdcaa2 100644
      hmap_destroy(&put_mac_bindings);
  }
  
-@@ -8510,6 +8511,7 @@ init_fdb_entries(void)
+@@ -4527,13 +4534,9 @@ run_buffered_binding(const struct sbrec_mac_binding_table *mac_binding_table,
+ }
+ 
+ static void
+-wait_put_mac_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn)
++wait_put_mac_bindings(void)
+     OVS_REQUIRES(pinctrl_mutex)
+ {
+-    if (!ovnsb_idl_txn) {
+-        return;
+-    }
+-
+     struct mac_binding *mb;
+     HMAP_FOR_EACH (mb, hmap_node, &put_mac_bindings) {
+         poll_timer_wait_until(mb->timestamp);
+@@ -5525,7 +5528,7 @@ ip_mcast_sync(struct ovsdb_idl_txn *ovnsb_idl_txn,
+         struct local_datapath *local_dp =
+             get_local_datapath(local_datapaths, ip_ms->dp_key);
+ 
+-        if (!local_dp) {
++        if (!local_dp || !local_dp->is_switch) {
+             continue;
+         }
+ 
+@@ -6555,12 +6558,8 @@ exit:
+ }
+ 
+ static void
+-wait_controller_event(struct ovsdb_idl_txn *ovnsb_idl_txn)
++wait_controller_event(void)
+ {
+-    if (!ovnsb_idl_txn) {
+-        return;
+-    }
+-
+     for (size_t i = 0; i < OVN_EVENT_MAX; i++) {
+         if (!hmap_is_empty(&event_table[i])) {
+             poll_immediate_wake();
+@@ -6705,9 +6704,9 @@ destroy_put_vport_bindings(void)
+ }
+ 
+ static void
+-wait_put_vport_bindings(struct ovsdb_idl_txn *ovnsb_idl_txn)
++wait_put_vport_bindings(void)
+ {
+-    if (ovnsb_idl_txn && !hmap_is_empty(&put_vport_bindings)) {
++    if (!hmap_is_empty(&put_vport_bindings)) {
+         poll_immediate_wake();
+     }
+ }
+@@ -7006,7 +7005,7 @@ sync_svc_monitors(struct ovsdb_idl_txn *ovnsb_idl_txn,
+             continue;
+         }
+ 
+-        if (pb->chassis != our_chassis) {
++        if ((pb->chassis != our_chassis) || (pb->n_up && !pb->up[0])) {
+             continue;
+         }
+ 
+@@ -8023,22 +8022,25 @@ svc_monitors_run(struct rconn *swconn,
+             break;
+ 
+         case SVC_MON_S_WAITING:
+-            if (current_time > svc_mon->wait_time) {
++            if (current_time >= svc_mon->wait_time) {
++                svc_mon->next_send_time = current_time + svc_mon->interval;
++                next_run_time = svc_mon->next_send_time;
+                 if (svc_mon->protocol ==  SVC_MON_PROTO_TCP) {
+                     svc_mon->n_failures++;
+                     svc_mon->state = SVC_MON_S_OFFLINE;
++                    goto offline;
+                 } else {
+                     svc_mon->n_success++;
+                     svc_mon->state = SVC_MON_S_ONLINE;
++                    goto online;
+                 }
+-                svc_mon->next_send_time = current_time + svc_mon->interval;
+-                next_run_time = svc_mon->next_send_time;
+             } else {
+                 next_run_time = svc_mon->wait_time;
+             }
+             break;
+ 
+         case SVC_MON_S_ONLINE:
++            online:
+             if (svc_mon->n_success >= svc_mon->success_count) {
+                 svc_mon->status = SVC_MON_ST_ONLINE;
+                 svc_mon->n_success = 0;
+@@ -8054,6 +8056,7 @@ svc_monitors_run(struct rconn *swconn,
+             break;
+ 
+         case SVC_MON_S_OFFLINE:
++            offline:
+             if (svc_mon->n_failures >= svc_mon->failure_count) {
+                 svc_mon->status = SVC_MON_ST_OFFLINE;
+                 svc_mon->n_success = 0;
+@@ -8510,6 +8513,7 @@ init_fdb_entries(void)
  static void
  destroy_fdb_entries(void)
  {
 +    fdbs_clear(&put_fdbs);
      hmap_destroy(&put_fdbs);
+ }
+ 
+@@ -8610,9 +8614,9 @@ run_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn,
+ 
+ 
+ static void
+-wait_put_fdbs(struct ovsdb_idl_txn *ovnsb_idl_txn)
++wait_put_fdbs(void)
+ {
+-    if (ovnsb_idl_txn && !hmap_is_empty(&put_fdbs)) {
++    if (!hmap_is_empty(&put_fdbs)) {
+         poll_immediate_wake();
+     }
+ }
+diff --git a/controller/statctrl.c b/controller/statctrl.c
+index 4b8e0184d..b83d96742 100644
+--- a/controller/statctrl.c
++++ b/controller/statctrl.c
+@@ -101,6 +101,7 @@ struct statctrl_ctx {
+ 
+     struct seq *thread_seq;
+     struct seq *main_seq;
++    uint64_t new_main_seq;
+ 
+     struct stats_node nodes[STATS_MAX];
+ };
+@@ -142,6 +143,7 @@ statctrl_init(void)
+     ovs_mutex_init(&mutex);
+     statctrl_ctx.thread_seq = seq_create();
+     statctrl_ctx.main_seq = seq_create();
++    statctrl_ctx.new_main_seq = seq_read(statctrl_ctx.main_seq);
+ 
+     /* Definition of all stat nodes. */
+     struct ofputil_flow_stats_request mac_binding_request = {
+@@ -200,6 +202,7 @@ statctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
+     long long now = time_msec();
+ 
+     ovs_mutex_lock(&mutex);
++    statctrl_ctx.new_main_seq = seq_read(statctrl_ctx.main_seq);
+     for (size_t i = 0; i < STATS_MAX; i++) {
+         struct stats_node *node = &statctrl_ctx.nodes[i];
+         uint64_t prev_delay = node->request_delay;
+@@ -242,8 +245,7 @@ statctrl_wait(struct ovsdb_idl_txn *ovnsb_idl_txn)
+             poll_immediate_wake();
+         }
+     }
+-    int64_t new_seq = seq_read(statctrl_ctx.main_seq);
+-    seq_wait(statctrl_ctx.main_seq, new_seq);
++    seq_wait(statctrl_ctx.main_seq, statctrl_ctx.new_main_seq);
+     ovs_mutex_unlock(&mutex);
  }
  
 diff --git a/debian/changelog b/debian/changelog
@@ -56,20 +374,324 @@ index 5362ff3d9..14f3fe0f4 100644
  ovn (24.03.7-1) unstable; urgency=low
     [ OVN team ]
     * New upstream version
+diff --git a/northd/northd.c b/northd/northd.c
+index ffd086658..4a74ef15a 100644
+--- a/northd/northd.c
++++ b/northd/northd.c
+@@ -3258,6 +3258,11 @@ ovn_port_update_sbrec(struct ovsdb_idl_txn *ovnsb_txn,
+                     smap_add(&new, "distributed-port", op->nbsp->name);
+                 } else if (router_port) {
+                     smap_add(&new, "peer", router_port);
++                    /* Add enable_router_port_acl option for CT zone alloc
++                     * to patch ports that need ACL processing. */
++                    if (op->enable_router_port_acl) {
++                        smap_add(&new, "enable_router_port_acl", "true");
++                    }
+                 }
+                 if (chassis) {
+                     smap_add(&new, "l3gateway-chassis", chassis);
+@@ -4986,6 +4991,12 @@ northd_handle_sb_port_binding_changes(
+     const struct sbrec_port_binding *pb;
+     static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
+     SBREC_PORT_BINDING_TABLE_FOR_EACH_TRACKED (pb, sbrec_port_binding_table) {
++        /* "New" + "Deleted" is a no-op. */
++        if (sbrec_port_binding_is_new(pb) &&
++            sbrec_port_binding_is_deleted(pb)) {
++            continue;
++        }
++
+         bool is_router_port = is_pb_router_type(pb);
+         struct ovn_port *op = NULL;
+ 
+diff --git a/tests/ovn-controller-vtep.at b/tests/ovn-controller-vtep.at
+index 22fccdbf1..3a0ff0537 100644
+--- a/tests/ovn-controller-vtep.at
++++ b/tests/ovn-controller-vtep.at
+@@ -162,6 +162,7 @@ AT_CHECK([ovn-sbctl --columns=vtep_logical_switches list Chassis | cut -d ':' -f
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP([/Chassis for VTEP physical switch (br-vtep) disappears/d])
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ 
+@@ -237,6 +238,7 @@ AT_CHECK_UNQUOTED([ovn-sbctl --columns=chassis list Port_Binding | cut -d ':' -f
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP([/has already been associated with logical port/d])
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ 
+@@ -279,6 +281,7 @@ ${chassis_uuid}
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP([/has already been associated with logical datapath/d])
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ 
+@@ -333,6 +336,7 @@ AT_CHECK([vtep-ctl --columns=tunnel_key list Logical_Switch | cut -d ':' -f2 | t
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ 
+@@ -437,6 +441,7 @@ AT_CHECK([vtep-ctl --columns=MAC list Ucast_Macs_Remote | cut -d ':' -f2- | tr -
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ 
+@@ -507,6 +512,7 @@ AT_CHECK([vtep-ctl --columns=MAC list Ucast_Macs_Remote | cut -d ':' -f2- | tr -
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP([/has already been known to be on logical port/d])
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ # Tests vtep module 'Mcast_Macs_Remote's.
+@@ -565,6 +571,7 @@ done | sort], [0], [dnl
+ ])
+ 
+ OVN_CONTROLLER_VTEP_STOP
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ 
+ 
+@@ -628,6 +635,7 @@ AT_CHECK([ovs-ofctl dump-flows br-int table=0 | grep 'priority=110' | \
+ priority=110,tun_id=0x<>,in_port=<> actions=move:NXM_NX_TUN_ID[[0..23]]->OXM_OF_METADATA[[0..23]],load:0x<>->NXM_NX_REG14[[0..14]],load:0x<>->NXM_NX_REG10[[1]],resubmit(,8)
+ ])
+ 
++OVN_CONTROLLER_VTEP_STOP([], vtep1)
+ OVN_CLEANUP([hv1])
+ AT_CLEANUP
+ ])
+@@ -635,7 +643,6 @@ AT_CLEANUP
+ AT_SETUP([ovn -- check ovn-northd and ovn-controller-vtep version pinning])
+ ovn_start
+ OVN_CONTROLLER_VTEP_START(vtep1)
+-net_add n1
+ 
+ # adds vlan_bindings to physical ports.
+ check as vtep1 vtep-ctl add-ls lswitch0 -- bind-ls vtep1 p0 100 lswitch0 -- bind-ls vtep1 p0 200 lswitch0 -- bind-ls vtep1 p1 300 lswitch0
+@@ -682,4 +689,7 @@ AT_CHECK([ovn-sbctl --columns=vtep_logical_switches list Chassis | cut -d ':' -f
+ [[lswitch0]]
+ ])
+ 
++OVN_CONTROLLER_VTEP_STOP([], vtep1)
++
++OVN_CLEANUP_DBS
+ AT_CLEANUP
+diff --git a/tests/ovn-controller.at b/tests/ovn-controller.at
+index 309ae2f9c..a0078cb25 100644
+--- a/tests/ovn-controller.at
++++ b/tests/ovn-controller.at
+@@ -166,12 +166,13 @@ AT_CHECK([ovs-vsctl remove Open_vSwitch . external-ids ovn-bridge-mappings])
+ check_bridge_mappings
+ check_patches
+ 
+-# Gracefully terminate daemons
++# Gracefully terminate daemons.
+ OVN_CLEANUP_SBOX([hv])
+-OVN_CLEANUP_VSWITCH([main])
++
+ as ovn-sb
+ OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+ 
++OVN_CLEANUP_VSWITCH([main])
+ AT_CLEANUP
+ ])
+ 
+@@ -298,14 +299,11 @@ wait_row_count Chassis 1
+ # - could not create datapath br-int of unknown type bar
+ # - failed to create bridge br-int: Address family not supported by protocol # due to previous errors.
+ # - 'hv' already has encap ip '192.168.0.1' and type 'geneve', cannot duplicate on 'hv-foo'
+-OVN_CLEANUP_SBOX([hv], ["/foo/d
++OVN_CLEANUP([hv
++/foo/d
+ /bar/d
+ /already has encap ip.*cannot duplicate on/d
+-/failed to create bridge/d"])
+-
+-OVN_CLEANUP_VSWITCH([main])
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++/failed to create bridge/d])
+ 
+ AT_CLEANUP
+ ])
+@@ -375,14 +373,7 @@ OVS_WAIT_UNTIL([check_tunnel_property options:local_ip "\"192.168.0.1\""])
+ ovs-vsctl set interface ovn-fakech-0 options:local_ip="1.1.1.1"
+ OVS_WAIT_UNTIL([check_tunnel_property options:local_ip "\"192.168.0.1\""])
+ 
+-# Gracefully terminate daemons
+-OVN_CLEANUP_SBOX([hv])
+-OVN_CLEANUP_VSWITCH([main])
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
++OVN_CLEANUP([hv])
+ AT_CLEANUP
+ ])
+ 
+@@ -413,14 +404,8 @@ OVS_WAIT_UNTIL([check_sbdb_connection 'not connected'])
+ 
+ # reset the remote for clean-up
+ ovs-vsctl set open . external_ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock
+-# Gracefully terminate daemons
+-OVN_CLEANUP_SBOX([hv])
+-OVN_CLEANUP_VSWITCH([main])
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+ 
++OVN_CLEANUP([hv])
+ AT_CLEANUP
+ ])
+ 
+@@ -446,14 +431,7 @@ check ovn-sbctl chassis-del hv
+ # ovn-controller should recreate its chassis row.
+ OVS_WAIT_UNTIL([test xhv = x`ovn-sbctl --columns name --bare find chassis`])
+ 
+-# Gracefully terminate daemons
+-OVN_CLEANUP_SBOX([hv])
+-OVN_CLEANUP_VSWITCH([main])
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
++OVN_CLEANUP([hv])
+ AT_CLEANUP
+ 
+ # Checks that ovn-controller increments the nb_cfg value in the Chassis_Private table
+@@ -869,7 +847,7 @@ check ovn-nbctl meter-add event-elb drop 100 pktps 10
+ check ovn-nbctl --wait=hv copp-add copp0 event-elb event-elb
+ check ovn-nbctl --wait=hv ls-copp-add copp0 ls1
+ 
+-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.0f | grep -q meter_id=1])
++AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.0f | grep -q meter_id=1], [0], [], [ignore])
+ 
+ check ovn-nbctl copp-del copp0
+ AT_CHECK([ovn-nbctl copp-list copp0], [0], [dnl
+@@ -882,13 +860,13 @@ check ovn-nbctl --wait=hv copp-add copp1 reject acl-meter
+ check ovn-nbctl ls-copp-add copp1 ls1
+ check ovn-nbctl --wait=hv acl-add ls1 from-lport 1002 'inport == "lsp1" && ip && udp' reject
+ 
+-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.16 | grep -q meter_id=1])
++AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.16 | grep -q meter_id=1], [0], [], [ignore])
+ 
+ # arp metering
+ check ovn-nbctl meter-add arp-meter drop 200 pktps 0
+ check ovn-nbctl --wait=hv copp-add copp2 arp-resolve arp-meter
+ check ovn-nbctl --wait=hv lr-copp-add copp2 lr1
+-AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.00 | grep -q meter_id=2])
++AT_CHECK([as hv1 ovs-ofctl dump-flows br-int | grep controller | grep userdata=00.00.00.00 | grep -q meter_id=2], [0], [], [ignore])
+ 
+ OVN_CLEANUP([hv1])
+ AT_CLEANUP
+@@ -962,12 +940,8 @@ AT_CHECK([test "$tos_option" = "$no_tos_options"], [0], [])
+ 
+ # Gracefully terminate daemons
+ # Expect invalid TOS 61
+-OVN_CLEANUP_SBOX([hv], ["/invalid TOS 61/d"])
+-OVN_CLEANUP_VSWITCH([main])
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++OVN_CLEANUP([hv
++/invalid TOS 61/d])
+ 
+ AT_CLEANUP
+ ])
+@@ -2082,7 +2056,7 @@ check ovn-nbctl --wait=hv sync
+ check ovn-nbctl remove address_set as1 addresses 10.0.0.1/32
+ check ovn-nbctl --wait=hv sync
+ 
+-AT_CHECK([grep "already references desired flow" hv1/ovn-controller.log | grep -q "nw_src=10.0.0.1"])
++AT_CHECK([grep "already references desired flow" hv1/ovn-controller.log | grep -q "nw_src=10.0.0.1"], [0], [], [ignore])
+ 
+ # Same for duplicate IPv6 addresses.
+ check ovn-nbctl add address_set as2 addresses '["::01"]'
+@@ -2090,7 +2064,7 @@ check ovn-nbctl --wait=hv sync
+ check ovn-nbctl remove address_set as2 addresses '["::01"]'
+ check ovn-nbctl --wait=hv sync
+ 
+-AT_CHECK([grep "already references desired flow" hv1/ovn-controller.log | grep -q "ipv6_src=::1"])
++AT_CHECK([grep "already references desired flow" hv1/ovn-controller.log | grep -q "ipv6_src=::1"], [0], [], [ignore])
+ 
+ OVN_CLEANUP([hv1
+ /already references desired flow/d
+@@ -2486,8 +2460,8 @@ AT_CHECK([ovn-nbctl --wait=hv sync])
+ # Check if ovn-controller is still alive
+ AT_CHECK([ps $pid], [0], [ignore])
+ # Check if we got warnings for invalid
+-AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid1])
+-AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid2])
++AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid1], [0], [], [ignore])
++AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q invalid2], [0], [], [ignore])
+ AT_CHECK([grep "Parsing of ovn-chassis-mac-mappings failed" hv1/ovn-controller.log | grep -q br1], [1])
+ 
+ OVN_CLEANUP([hv1
+@@ -2764,6 +2738,7 @@ name: 'foo' value: 'foo-hv'
+ check ovn-nbctl --wait=hv remove Chassis_Template_Var hv variables foo
+ AT_CHECK([GET_LOCAL_TEMPLATE_VARS], [1], [])
+ 
++OVN_CLEANUP([hv])
+ AT_CLEANUP
+ ])
+ 
+@@ -2790,6 +2765,7 @@ zone_num=$(printf "$ct_zones" | grep lr0_snat | cut -d ' ' -f 2)
+ 
+ check test "$zone_num" -eq 666
+ 
++OVN_CLEANUP([hv1])
+ AT_CLEANUP
+ ])
+ 
+diff --git a/tests/ovn-ic.at b/tests/ovn-ic.at
+index 680ab0270..9afd3a281 100644
+--- a/tests/ovn-ic.at
++++ b/tests/ovn-ic.at
+@@ -1204,6 +1204,8 @@ AT_CHECK([ovn_as az2 ovn-nbctl lr-route-list lr12 | grep dst-ip | sort], [0], [d
+            192.168.1.0/24             169.254.100.1 dst-ip (learned)
+ ])
+ 
++OVN_CLEANUP_IC([az1], [az2])
++
+ AT_CLEANUP
+ ])
+ 
 diff --git a/tests/ovn-macros.at b/tests/ovn-macros.at
-index b9d2e01ed..d7c107106 100644
+index b9d2e01ed..25c85889b 100644
 --- a/tests/ovn-macros.at
 +++ b/tests/ovn-macros.at
-@@ -1,3 +1,22 @@
-+# OVN_CLEANUP_NORTHD
+@@ -1,3 +1,29 @@
++# OVN_CLEANUP_DBS
 +#
-+# Gracefully terminate all central OVN daemons: NB, SB and ovn-northd.
-+m4_define([OVN_CLEANUP_NORTHD],[
++# Gracefully terminate NB, SB OVN daemons.
++m4_define([OVN_CLEANUP_DBS],[
 +    as ovn-sb
 +    OVS_APP_EXIT_AND_WAIT([ovsdb-server])
 +
 +    as ovn-nb
 +    OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++])
++
++# OVN_CLEANUP_NORTHD
++#
++# Gracefully terminate all central OVN daemons: NB, SB and ovn-northd.
++m4_define([OVN_CLEANUP_NORTHD],[
++    OVN_CLEANUP_DBS
 +
 +    as northd
 +    OVS_APP_EXIT_AND_WAIT([ovn-northd])
@@ -84,7 +706,7 @@ index b9d2e01ed..d7c107106 100644
  #
  # Gracefully terminate vswitch daemons in the
 diff --git a/tests/ovn-northd.at b/tests/ovn-northd.at
-index a29bf0b58..1257c7631 100644
+index a29bf0b58..4a4f962a8 100644
 --- a/tests/ovn-northd.at
 +++ b/tests/ovn-northd.at
 @@ -151,6 +151,7 @@ check_row_count HA_Chassis 0
@@ -476,6 +1098,35 @@ index a29bf0b58..1257c7631 100644
  AT_CLEANUP
  ])
  
+@@ -3786,23 +3818,23 @@ wait_row_count bfd 1 logical_port=r0-sw1 min_rx=1000 min_tx=1000 detect_mult=100
+ 
+ check ovn-nbctl --bfd=$uuid lr-route-add r0 100.0.0.0/8 192.168.1.2
+ wait_column down bfd status logical_port=r0-sw1
+-AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.1.2 | grep -q bfd],[0])
++AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.1.2 | grep -q bfd], [0], [], [ignore])
+ 
+ check ovn-nbctl --bfd lr-route-add r0 200.0.0.0/8 192.168.2.2
+ wait_column down bfd status logical_port=r0-sw2
+-AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.2.2 | grep -q bfd],[0])
++AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.2.2 | grep -q bfd], [0], [], [ignore])
+ 
+ check ovn-nbctl --bfd lr-route-add r0 240.0.0.0/8 192.168.5.2 r0-sw5
+ wait_column down bfd status logical_port=r0-sw5
+-AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.5.2 | grep -q bfd],[0])
++AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.5.2 | grep -q bfd], [0], [], [ignore])
+ 
+ check ovn-nbctl --bfd --policy=src-ip lr-route-add r0 192.168.6.1/32 192.168.10.10 r0-sw6
+ wait_column down bfd status logical_port=r0-sw6
+-AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.6.1 | grep -q bfd],[0])
++AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.6.1 | grep -q bfd], [0], [], [ignore])
+ 
+ check ovn-nbctl --bfd --policy=src-ip lr-route-add r0 192.168.7.1/32 192.168.10.10 r0-sw7
+ wait_column down bfd status logical_port=r0-sw7
+-AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.7.1 | grep -q bfd],[0])
++AT_CHECK([ovn-nbctl lr-route-list r0 | grep 192.168.7.1 | grep -q bfd], [0], [], [ignore])
+ 
+ route_uuid=$(fetch_column nb:logical_router_static_route _uuid ip_prefix="100.0.0.0/8")
+ check ovn-nbctl clear logical_router_static_route $route_uuid bfd
 @@ -3837,6 +3869,7 @@ wait_column down bfd status dst_ip=192.168.9.4
  bfd_route_policy_uuid=$(fetch_column nb:bfd _uuid logical_port=r0-sw9)
  AT_CHECK([ovn-nbctl list logical_router_policy | sed s/,//g | grep -q "$bfd_route_policy_uuid"])
@@ -484,6 +1135,69 @@ index a29bf0b58..1257c7631 100644
  AT_CLEANUP
  ])
  
+@@ -3860,7 +3893,7 @@ AT_CHECK([ovn-nbctl copp-list copp0], [0], [dnl
+ event-elb: meter0
+ ])
+ 
+-AT_CHECK([ovn-sbctl list logical_flow | grep trigger_event -A 2 | grep -q meter0])
++AT_CHECK([ovn-sbctl list logical_flow | grep trigger_event -A 2 | grep -q meter0], [0], [], [ignore])
+ 
+ check ovn-nbctl --wait=hv meter-add meter1 drop 300 pktps 10
+ AT_CHECK([ovn-nbctl meter-list |grep meter1 -A 1], [0], [dnl
+@@ -3878,7 +3911,7 @@ AT_CHECK([ovn-nbctl copp-list copp1], [0], [dnl
+ arp: meter1
+ ])
+ 
+-AT_CHECK([ovn-sbctl list logical_flow | grep arp -A 2 | grep -q meter1])
++AT_CHECK([ovn-sbctl list logical_flow | grep arp -A 2 | grep -q meter1], [0], [], [ignore])
+ 
+ check ovn-nbctl --wait=hv copp-del copp1 arp
+ AT_CHECK([ovn-nbctl copp-list copp1], [0], [dnl
+@@ -3892,7 +3925,7 @@ AT_CHECK([ovn-nbctl copp-list copp2], [0], [dnl
+ icmp4-error: meter2
+ ])
+ 
+-AT_CHECK([ovn-sbctl list logical_flow | grep icmp4 -A 2 | grep -q meter2])
++AT_CHECK([ovn-sbctl list logical_flow | grep icmp4 -A 2 | grep -q meter2], [0], [], [ignore])
+ 
+ check ovn-nbctl --wait=hv copp-del copp2 icmp4-error
+ AT_CHECK([ovn-nbctl copp-list copp2], [0], [dnl
+@@ -3904,7 +3937,7 @@ AT_CHECK([ovn-nbctl copp-list copp3], [0], [dnl
+ icmp6-error: meter2
+ ])
+ 
+-AT_CHECK([ovn-sbctl list logical_flow | grep icmp6 -A 2 | grep -q meter2])
++AT_CHECK([ovn-sbctl list logical_flow | grep icmp6 -A 2 | grep -q meter2], [0], [], [ignore])
+ 
+ check ovn-nbctl --wait=hv copp-del copp3 icmp6-error
+ AT_CHECK([ovn-nbctl copp-list copp3], [0], [dnl
+@@ -3916,7 +3949,7 @@ AT_CHECK([ovn-nbctl copp-list copp4], [0], [dnl
+ tcp-reset: meter2
+ ])
+ 
+-AT_CHECK([ovn-sbctl list logical_flow | grep tcp -A 2 | grep -q meter2])
++AT_CHECK([ovn-sbctl list logical_flow | grep tcp -A 2 | grep -q meter2], [0], [], [ignore])
+ 
+ check ovn-nbctl --wait=hv copp-del copp4 tcp-reset
+ AT_CHECK([ovn-nbctl copp-list copp4], [0], [dnl
+@@ -3945,7 +3978,7 @@ check ovn-nbctl --wait=hv lr-copp-add copp7 r0
+ AT_CHECK([ovn-nbctl copp-list copp7], [0], [dnl
+ bfd: meter0
+ ])
+-AT_CHECK([ovn-sbctl list logical_flow | grep bfd -A 2 | grep -q meter0])
++AT_CHECK([ovn-sbctl list logical_flow | grep bfd -A 2 | grep -q meter0],[0],[],[ignore])
+ 
+ check ovn-nbctl --wait=hv set Logical_Switch sw1 \
+     other_config:mcast_querier="false" \
+@@ -3955,7 +3988,7 @@ check ovn-nbctl --wait=hv ls-copp-add copp8 sw1
+ AT_CHECK([ovn-nbctl copp-list copp8], [0], [dnl
+ igmp: meter1
+ ])
+-AT_CHECK([ovn-sbctl list logical_flow | grep igmp -A 2 | grep -q meter1])
++AT_CHECK([ovn-sbctl list logical_flow | grep igmp -A 2 | grep -q meter1],[0],[],[ignore])
+ 
+ check ovn-nbctl copp-del copp8
+ AT_CHECK([ovn-nbctl copp-list copp8], [0], [dnl
 @@ -4015,6 +4048,7 @@ check ovn-nbctl --wait=hv ls-copp-add copp0 sw2
  ls2_copp_uuid=$(ovn-nbctl get Logical_Switch sw2 copp)
  AT_CHECK([test "$ls2_copp_uuid" = "$copp_uuid"])
@@ -709,7 +1423,15 @@ index a29bf0b58..1257c7631 100644
  AT_CLEANUP
  ])
  
-@@ -7095,6 +7155,7 @@ check ovn-nbctl --wait=sb set Logical_Switch S1 \
+@@ -7088,13 +7148,14 @@ AT_CHECK([ovn-sbctl lflow-list S1 | grep ls_in_l2_lkup | grep -q 'match=(eth.mca
+ check ovn-nbctl --wait=sb set Logical_Switch S1 \
+     other_config:broadcast-arps-to-all-routers=false
+ 
+-AT_CHECK([ovn-sbctl lflow-list S1 | grep ls_in_l2_lkup | grep -q 'match=(eth.mcast && (arp.op == 1 || nd_ns)), action=(outport = "_MC_flood_l2"; output;)'], [0])
++AT_CHECK([ovn-sbctl lflow-list S1 | grep ls_in_l2_lkup | grep -q 'match=(eth.mcast && (arp.op == 1 || nd_ns)), action=(outport = "_MC_flood_l2"; output;)'], [0], [], [ignore])
+ 
+ check ovn-nbctl --wait=sb set Logical_Switch S1 \
+     other_config:broadcast-arps-to-all-routers=true
  
  AT_CHECK([ovn-sbctl lflow-list S1 | grep ls_in_l2_lkup | grep -q 'match=(eth.mcast && (arp.op == 1 || nd_ns)), action=(outport = "_MC_flood_l2"; output;)'], [1])
  
@@ -1045,10 +1767,78 @@ index a29bf0b58..1257c7631 100644
  AT_CLEANUP
  ])
 diff --git a/tests/ovn.at b/tests/ovn.at
-index 7e76fea0d..c6444f8a2 100644
+index 7e76fea0d..bfc3f0343 100644
 --- a/tests/ovn.at
 +++ b/tests/ovn.at
-@@ -9011,14 +9011,7 @@ AT_CHECK([ovn-nbctl list Logical-Switch-Port | grep 192.10.2.127], [1])
+@@ -2467,6 +2467,7 @@ OVS_WAIT_UNTIL([test x`ovs-vsctl get Open_vSwitch . other_config:vlan-limit | tr
+ check ovs-vsctl set Open_vSwitch . other_config:vlan-limit=foo
+ OVS_WAIT_UNTIL([test x`ovs-vsctl get Open_vSwitch . other_config:vlan-limit | tr -d '""'` = x0])
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -3225,6 +3226,7 @@ AT_CHECK_UNQUOTED([ovs-appctl -t ovn-trace trace --all lsw100 "inport == p100 &&
+ unknown datapath "lsw100"
+ ])
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -3978,6 +3980,7 @@ for i in 1 2; do
+     OVN_CHECK_PACKETS([vif$i-tx.pcap], [$i.expected])
+ done
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -4248,6 +4251,7 @@ for i in 1 2; do
+     OVN_CHECK_PACKETS_REMOVE_BROADCAST([vif$i-tx.pcap], [$i.expected])
+ done
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -4295,6 +4299,7 @@ for i in 1 2; do
+     OVN_CHECK_PACKETS_REMOVE_BROADCAST([vif$i-tx.pcap], [$i.expected])
+ done
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -4345,6 +4350,7 @@ AT_CHECK([ovn-sbctl get Port_Binding lsp-good tunnel_key], [0], [dnl
+ 1000
+ ])
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -7504,14 +7510,11 @@ expected_dhcp_opts=4311626f6f7466696c655f6e616d655f616c74330400000e100104ffffff0
+ test_dhcp 21 1 f00000000001 01 0 $ciaddr $offer_ip $request_ip 0 1 $offer_ip $server_ip ff1000000001 $server_ip 02 $expected_dhcp_opts
+ compare_dhcp_packets 1
+ 
+-as hv1
+-OVS_APP_EXIT_AND_WAIT([ovn-controller])
+-
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++OVN_CLEANUP_SBOX([hv1], ["/DHCP/d
++/mismatch with northd version/d"
++])
++OVN_CLEANUP_DBS
++OVN_CLEANUP_VSWITCH([main])
+ AT_CLEANUP
+ ])
+ 
+@@ -9011,14 +9014,7 @@ AT_CHECK([ovn-nbctl list Logical-Switch-Port | grep 192.10.2.127], [1])
  AT_CHECK([ovn-nbctl list Logical-Switch-Port | grep 192.10.2.128], [1])
  AT_CHECK([ovn-nbctl list Logical-Switch-Port | grep 192.10.2.180], [1])
  
@@ -1064,6 +1854,186 @@ index 7e76fea0d..c6444f8a2 100644
  AT_CLEANUP
  ])
  
+@@ -9864,6 +9860,7 @@ AT_CHECK([ovn-nbctl --wait=sb  set logical_switch_port local1 tag_request=50])
+ AT_CHECK([ovn-nbctl lsp-get-tag local1], [0], [50
+ ])
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -13590,6 +13587,7 @@ for suffix in 2 a; do
+ ],[ignore])
+ done
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -13644,6 +13642,7 @@ send_arp_request lsp lp ${src_mac} ${src_ip} ${dst_ip}
+ 
+ OVN_CHECK_PACKETS([lp-tx.pcap], [lp.expected])
+ 
++OVN_CLEANUP
+ AT_CLEANUP
+ ])
+ 
+@@ -18710,6 +18709,7 @@ dnl Check if updated address got propagated to the port group address sets
+ check_column '10.0.0.11 10.0.0.2' Address_Set addresses name=pg1_ip4
+ check_column '2001:db8::11 2001:db8::2' Address_Set addresses name=pg1_ip6
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -18776,6 +18776,7 @@ AT_CHECK(
+ [["2001:db8:2::ff:fe00:2", "2001:db8:3::ff:fe00:3"]]
+ ])
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -20978,6 +20979,7 @@ AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 192.168.0.2"])
+ AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 192.168.0.3"])
+ AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 aef0::1"])
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -21397,6 +21399,7 @@ AT_CLEANUP
+ OVN_FOR_EACH_NORTHD([
+ AT_SETUP([IP packet buffering])
+ AT_KEYWORDS([ip-buffering])
++AT_SKIP_IF([test $HAVE_SCAPY = no])
+ ovn_start
+ 
+ # Logical network:
+@@ -21729,6 +21732,8 @@ ovn-nbctl get Logical-Switch-Port p0 dynamic_addresses
+ 
+ AT_CHECK([ovn-nbctl get Logical-Switch-Port p0 dynamic_addresses], [0], [[[]]
+ ])
++
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -21752,6 +21757,7 @@ done
+ ovn-nbctl list logical_switch_port
+ ovn-nbctl list logical_router_port
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -22701,6 +22707,7 @@ AT_CHECK([ovn-nbctl ls-add sw1], [1], [ignore],
+ [ovn-nbctl: transaction error: {"details":"insert operation not allowed when database server is in read only mode","error":"not allowed"}
+ ])
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -24327,6 +24334,7 @@ on_exit 'kill $(cat ovn-nbctl.pid)'
+ # but we can still ensure that the command is successful.
+ AT_CHECK([ovn-nbctl -u $sockfile show])
+ 
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -28062,6 +28070,8 @@ check ovn-nbctl lr-add r1
+ check ovn-nbctl lrp-add r1 rp1 CC:DD:EE:EE:DD:CC AEF0::1/64 BEF0::1/64
+ 
+ AT_CHECK([ovn-nbctl --may-exist lrp-add r1 rp1 cc:dd:ee:ee:dd:cc bef0:0000:0000:0000::1/64 aef0::1/64])
++
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -28075,6 +28085,8 @@ check ovn-nbctl lr-nat-add r1 dnat AEF0::1 BEEF::1
+ 
+ AT_CHECK([ovn-nbctl --may-exist lr-nat-add r1 snat aef0:0000::1 beef:0000::/ffff:ffff:ffff:ffff::0])
+ AT_CHECK([ovn-nbctl --may-exist lr-nat-add r1 dnat aef0:0000:00::1 beef::0001])
++
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -28088,6 +28100,8 @@ check ovn-nbctl lr-nat-add r1 dnat AEF0::1 BEEF::1
+ 
+ AT_CHECK([ovn-nbctl --if-exists lr-nat-del r1 snat beef:0000::0/ffff:ffff:ffff:ffff::0])
+ AT_CHECK([ovn-nbctl --if-exists lr-nat-del r1 dnat aef0:0000:00::1])
++
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -30932,14 +30946,9 @@ AT_CHECK_UNQUOTED([grep -c "in_port=2" offlows_table0.txt], [1], [dnl
+ 0
+ ])
+ 
+-as hv1
+-OVS_APP_EXIT_AND_WAIT([ovn-controller])
+-
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++OVN_CLEANUP_SBOX([hv1], ["/mismatch with northd version/d"])
++OVN_CLEANUP_DBS
++OVN_CLEANUP_VSWITCH([main])
+ 
+ AT_CLEANUP
+ ])
+@@ -38822,6 +38831,7 @@ dnl Make sure that the packet was received by vm0.
+ echo $packet >> expected-vif1
+ OVN_CHECK_PACKETS([hv/vif1-tx.pcap], [expected-vif1])
+ 
++OVN_CLEANUP([hv])
+ AT_CLEANUP
+ ])
+ 
+@@ -38965,6 +38975,7 @@ packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:fe', src='fa:16:3e:00:00:02')/ \
+ echo $packet >> expected-ext
+ OVN_CHECK_PACKETS([hv/br-phys_n1-tx.pcap], [expected-ext])
+ 
++OVN_CLEANUP([hv])
+ AT_CLEANUP
+ ])
+ 
+@@ -39385,6 +39396,8 @@ expected=$(fmt_pkt "Ether(dst='${rx_dst_mac}', src='${rx_src_mac}')/ \
+ 
+ echo $expected > expected
+ OVN_CHECK_PACKETS([hv1/server-tx.pcap], [expected])
++
++OVN_CLEANUP([hv1])
+ AT_CLEANUP
+ ])
+ 
+diff --git a/tests/perf-northd.at b/tests/perf-northd.at
+index 6d651b7e5..ceb2b6487 100644
+--- a/tests/perf-northd.at
++++ b/tests/perf-northd.at
+@@ -199,6 +199,8 @@ AT_SETUP([ovn-northd basic scale test -- 200 Hypervisors, 200 Logical Ports/Hype
+ ovn_start
+ 
+ BUILD_NBDB(OVN_BASIC_SCALE_CONFIG(200, 200))
++
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
+ 
+@@ -207,5 +209,7 @@ AT_SETUP([ovn-northd basic scale test -- 500 Hypervisors, 50 Logical Ports/Hyper
+ ovn_start
+ 
+ BUILD_NBDB(OVN_BASIC_SCALE_CONFIG(500, 50))
++
++OVN_CLEANUP_NORTHD
+ AT_CLEANUP
+ ])
 diff --git a/tests/system-common-macros.at b/tests/system-common-macros.at
 index f70824351..f6332f7c2 100644
 --- a/tests/system-common-macros.at
@@ -1085,7 +2055,7 @@ index f70824351..f6332f7c2 100644
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
 diff --git a/tests/system-ovn-kmod.at b/tests/system-ovn-kmod.at
-index 334c41588..511d9fea1 100644
+index 334c41588..f9d5cb6cb 100644
 --- a/tests/system-ovn-kmod.at
 +++ b/tests/system-ovn-kmod.at
 @@ -281,14 +281,7 @@ NS_CHECK_EXEC([foo1], [nc -z 192.168.1.100 8081])
@@ -1200,6 +2170,21 @@ index 334c41588..511d9fea1 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+@@ -1288,11 +1239,11 @@ check_flow_assured() {
+     echo Check if a conntrack entry exists for src=$src_ip, dst=$dst_ip, zone=$zone
+ 
+     if test -n "$src_ip" && test -n "$dst_ip"; then
+-        AT_CHECK([grep -F "$src_ip" conntrack_file | grep -F "$dst_ip" | grep "zone=$zone" | grep -q "ASSURED"])
++        AT_CHECK([grep -F "$src_ip" conntrack_file | grep -F "$dst_ip" | grep "zone=$zone" | grep -q "ASSURED"], [0], [], [ignore])
+     elif test -n "$src_ip"; then
+-        AT_CHECK([grep -F "$src_ip" conntrack_file | grep "zone=$zone" | grep -q "ASSURED"])
++        AT_CHECK([grep -F "$src_ip" conntrack_file | grep "zone=$zone" | grep -q "ASSURED"], [0], [], [ignore])
+     else
+-        AT_CHECK([grep -F "$dst_ip" conntrack_file | grep "zone=$zone" | grep -q "ASSURED"])
++        AT_CHECK([grep -F "$dst_ip" conntrack_file | grep "zone=$zone" | grep -q "ASSURED"], [0], [], [ignore])
+     fi
+ }
+ 
 @@ -1308,14 +1259,7 @@ ovs-appctl revalidator/resume
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
@@ -1217,7 +2202,7 @@ index 334c41588..511d9fea1 100644
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
 diff --git a/tests/system-ovn.at b/tests/system-ovn.at
-index 202f890b7..95754961b 100644
+index 202f890b7..85b14f5a8 100644
 --- a/tests/system-ovn.at
 +++ b/tests/system-ovn.at
 @@ -164,14 +164,7 @@ icmp,orig=(src=192.168.2.2,dst=192.168.1.2,id=<cleared>,type=8,code=0),reply=(sr
@@ -1620,7 +2605,51 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -4623,14 +4448,7 @@ OVS_WAIT_UNTIL([
+@@ -4438,6 +4263,7 @@ ovs-vsctl \
+ 
+ # Start ovn-controller
+ start_daemon ovn-controller
++ovn-appctl vlog/set poll_loop:dbg
+ 
+ check ovn-nbctl ls-add sw0
+ 
+@@ -4572,9 +4398,12 @@ ovs-vsctl remove interface ovs-sw1-p1 external_ids iface-id
+ wait_row_count Service_Monitor 2
+ wait_row_count Service_Monitor 2 status=offline
+ 
++# Once port is added, status should be online very soon: if it takes more than a few seconds, that's a bug.
++OVS_CTL_TIMEOUT=3
+ ovs-vsctl set interface ovs-sw1-p1 external_ids:iface-id=sw1-p1
+ wait_row_count Service_Monitor 2
+ wait_row_count Service_Monitor 1 status=online
++OVS_CTL_TIMEOUT=30
+ 
+ # Create udp load balancer.
+ check ovn-nbctl lb-add lb2 10.0.0.10:80 10.0.0.3:80,20.0.0.3:80 udp
+@@ -4621,16 +4450,14 @@ OVS_WAIT_UNTIL([
+     test "${n_reset}" = "1"
+ ])
+ 
+-OVS_APP_EXIT_AND_WAIT([ovn-controller])
+-
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++# Check that we do not get too many immediate wake up.
++# Tolerate a few for any race conditions.
++AT_CHECK([test 5 -gt `cat ovn-controller.log | \
++grep -c "wakeup due to 0-ms timeout at controller/pinctrl.c:"`])
+ 
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
++OVS_APP_EXIT_AND_WAIT([ovn-controller])
+ 
+-as northd
+-OVS_APP_EXIT_AND_WAIT([ovn-northd])
++OVN_CLEANUP_NORTHD
+ 
+ as
+ OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+@@ -4800,14 +4627,7 @@ wait_row_count Service_Monitor 1 status=online
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1636,7 +2665,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -4800,14 +4618,7 @@ wait_row_count Service_Monitor 1 status=online
+@@ -4899,14 +4719,7 @@ NS_CHECK_EXEC([lsp], [nc 88.88.88.89 8080 -z], [0], [ignore], [ignore])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1652,7 +2681,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -4899,14 +4710,7 @@ NS_CHECK_EXEC([lsp], [nc 88.88.88.89 8080 -z], [0], [ignore], [ignore])
+@@ -4993,14 +4806,7 @@ NS_CHECK_EXEC([lsp], [nc 8800::0089 8080 -z], [0], [ignore], [ignore])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1668,7 +2697,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -4993,14 +4797,7 @@ NS_CHECK_EXEC([lsp], [nc 8800::0089 8080 -z], [0], [ignore], [ignore])
+@@ -5220,14 +5026,7 @@ aef0::3 udp port 90" | uniq | wc -l)
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1684,7 +2713,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5220,14 +5017,7 @@ aef0::3 udp port 90" | uniq | wc -l)
+@@ -5451,14 +5250,7 @@ aef0::3 udp port 90" | uniq | wc -l)
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1700,7 +2729,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5451,14 +5241,7 @@ aef0::3 udp port 90" | uniq | wc -l)
+@@ -5571,14 +5363,7 @@ AT_CHECK([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1716,7 +2745,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5571,14 +5354,7 @@ AT_CHECK([
+@@ -5685,14 +5470,7 @@ NS_CHECK_EXEC([sw0-p1-lbc], [nc -z 30.0.0.10 80], [0], [ignore], [ignore])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1732,7 +2761,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5685,14 +5461,7 @@ NS_CHECK_EXEC([sw0-p1-lbc], [nc -z 30.0.0.10 80], [0], [ignore], [ignore])
+@@ -5792,14 +5570,7 @@ tcp,orig=(src=42.42.42.3,dst=66.66.66.66,sport=<clnt_s_port>,dport=666),reply=(s
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1748,7 +2777,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5792,14 +5561,7 @@ tcp,orig=(src=42.42.42.3,dst=66.66.66.66,sport=<clnt_s_port>,dport=666),reply=(s
+@@ -5899,14 +5670,7 @@ tcp,orig=(src=4242::3,dst=6666::1,sport=<clnt_s_port>,dport=666),reply=(src=4242
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1764,7 +2793,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5899,14 +5661,7 @@ tcp,orig=(src=4242::3,dst=6666::1,sport=<clnt_s_port>,dport=666),reply=(src=4242
+@@ -5993,14 +5757,7 @@ NS_CHECK_EXEC([sw0-p1-f], [ping -q -c 3 -i 0.3 -w 2 10.0.0.5 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1780,7 +2809,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -5993,14 +5748,7 @@ NS_CHECK_EXEC([sw0-p1-f], [ping -q -c 3 -i 0.3 -w 2 10.0.0.5 | FORMAT_PING], \
+@@ -6202,14 +5959,7 @@ tcp,orig=(src=172.16.0.1,dst=10.0.0.2,sport=<cleared>,dport=<cleared>),reply=(sr
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1796,7 +2825,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -6202,14 +5950,7 @@ tcp,orig=(src=172.16.0.1,dst=10.0.0.2,sport=<cleared>,dport=<cleared>),reply=(sr
+@@ -6429,14 +6179,7 @@ tcp,orig=(src=fd07::1,dst=fd01::2,sport=<cleared>,dport=<cleared>),reply=(src=fd
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1812,7 +2841,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -6429,14 +6170,7 @@ tcp,orig=(src=fd07::1,dst=fd01::2,sport=<cleared>,dport=<cleared>),reply=(src=fd
+@@ -6478,14 +6221,7 @@ OVS_WAIT_UNTIL([test x$(ovn-nbctl lsp-get-up sw0-port1) = xdown])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1828,23 +2857,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -6478,14 +6212,7 @@ OVS_WAIT_UNTIL([test x$(ovn-nbctl lsp-get-up sw0-port1) = xdown])
- 
- OVS_APP_EXIT_AND_WAIT([ovn-controller])
- 
--as ovn-sb
--OVS_APP_EXIT_AND_WAIT([ovsdb-server])
--
--as ovn-nb
--OVS_APP_EXIT_AND_WAIT([ovsdb-server])
--
--as northd
--OVS_APP_EXIT_AND_WAIT([ovn-northd])
-+OVN_CLEANUP_NORTHD
- 
- as
- OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -6566,14 +6293,7 @@ icmp,orig=(src=192.168.1.2,dst=172.16.1.100,id=<cleared>,type=8,code=0),reply=(s
+@@ -6566,14 +6302,7 @@ icmp,orig=(src=192.168.1.2,dst=172.16.1.100,id=<cleared>,type=8,code=0),reply=(s
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1860,7 +2873,139 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
-@@ -6796,14 +6516,7 @@ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+@@ -6655,11 +6384,11 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port ext options:qos_burst=6000000])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 375000b cburst 375000b'])
++                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 3.....b cburst 3.....b'])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 750000b cburst 750000b'])
++                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 7.....b cburst 7.....b'])
+ 
+ # The same now with ovs db read only
+ #
+@@ -6677,24 +6406,24 @@ wake_up_ovsdb .
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 375000b cburst 375000b'])
++                grep -q 'class htb .* rate 200Kbit ceil 300Kbit burst 3.....b cburst 3.....b'])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 750000b cburst 750000b'])
++                grep -q 'class htb .* rate 400Kbit ceil 600Kbit burst 7.....b cburst 7.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_min_rate=200000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_max_rate=300000])
+ 
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 12Kbit ceil 34359Mbit burst 375000b cburst 373662b'])
++                grep -q 'class htb .* rate 12Kbit ceil 34359Mbit burst 3.....b cburst 3.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_burst=3000000])
+ OVS_WAIT_UNTIL([test "$(tc qdisc show | grep 'htb 1: dev ovs-public')" = ""])
+ 
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port ext options:qos_max_rate=800000])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 750000b cburst 750000b'])
++                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 7.....b cburst 7.....b'])
+ 
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_min_rate=400000])
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_max_rate=800000])
+@@ -6702,7 +6431,7 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port public options:qos_burst=6000000])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 750000b cburst 750000b'])
++                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 7.....b cburst 7.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port ext options qos_min_rate=400000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port ext options qos_max_rate=800000])
+@@ -6712,7 +6441,7 @@ OVS_WAIT_UNTIL([test "$(tc qdisc show | grep 'htb 1: dev ovs-ext')" = ""])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 750000b cburst 750000b'])
++                grep -q 'class htb .* rate 400Kbit ceil 800Kbit burst 7.....b cburst 7.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_min_rate=400000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port public options qos_max_rate=800000])
+@@ -6730,25 +6459,25 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw11 options:qos_burst=6000000])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 375000b cburst 374999b'])
++                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 3.....b cburst 3.....b'])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 750000b cburst 749999b'])
++                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 7.....b cburst 7.....b'])
+ 
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_min_rate=300000])
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_max_rate=500000])
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_burst=3000000])
+ 
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 375000b cburst 375000b'])
++                grep -q 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
+ 
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw12 options:qos_min_rate=400000])
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw12 options:qos_max_rate=500000])
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw12 options:qos_burst=3000000])
+ 
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 375000b cburst 375000b'])
++                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw02 options qos_min_rate=300000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw02 options qos_max_rate=500000])
+@@ -6756,9 +6485,9 @@ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw02 options qos_burst=3000000])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-public'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 375000b cburst 374999b'])
++                grep -q 'class htb .* rate 200Kbit ceil 350Kbit burst 3.....b cburst 3.....b'])
+ OVS_WAIT_UNTIL([test "$(tc class show dev ovs-public | \
+-                grep 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 375000b cburst 375000b')" = ""])
++                grep 'class htb .* prio 0 rate 300Kbit ceil 500Kbit burst 3.....b cburst 3.....b')" = ""])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw01 options qos_min_rate=200000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw01 options qos_max_rate=350000])
+@@ -6767,9 +6496,9 @@ OVS_WAIT_UNTIL([test "$(tc qdisc show | grep 'htb 1: dev ovs-public')" = ""])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 750000b cburst 749999b'])
++                grep -q 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 7.....b cburst 7.....b'])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 375000b cburst 375000b'])
++                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw11 options qos_min_rate=400000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw11 options qos_max_rate=700000])
+@@ -6777,9 +6506,9 @@ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw11 options qos_burst=6000000])
+ 
+ OVS_WAIT_UNTIL([tc qdisc show | grep -q 'htb 1: dev ovs-ext'])
+ OVS_WAIT_UNTIL([test "$(tc class show dev ovs-ext | \
+-                grep 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 750000b cburst 749999b')" = ""])
++                grep 'class htb .* prio 0 rate 400Kbit ceil 700Kbit burst 7.....b cburst 7.....b')" = ""])
+ OVS_WAIT_UNTIL([tc class show dev ovs-ext | \
+-                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 375000b cburst 375000b'])
++                grep -q 'class htb .* prio 0 rate 400Kbit ceil 500Kbit burst 3.....b cburst 3.....b'])
+ 
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw12 options qos_min_rate=400000])
+ AT_CHECK([ovn-nbctl remove Logical_Switch_Port sw12 options qos_max_rate=500000])
+@@ -6792,18 +6521,11 @@ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_max_rate=6000000000
+ AT_CHECK([ovn-nbctl set Logical_Switch_Port sw02 options:qos_burst=1000000])
+ 
+ OVS_WAIT_UNTIL([tc class show dev ovs-public | \
+-                grep -q 'class htb .* prio 0 rate 5Gbit ceil 6Gbit burst 125000b cburst 124500b'])
++                grep -q 'class htb .* prio 0 rate 5Gbit ceil 6Gbit burst 1.....b cburst 1.....b'])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1876,7 +3021,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
-@@ -6990,14 +6703,7 @@ check ovn-nbctl destroy bfd $uuid_v6
+@@ -6990,14 +6712,7 @@ check ovn-nbctl destroy bfd $uuid_v6
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1892,7 +3037,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
-@@ -7119,14 +6825,7 @@ AT_CHECK([ovs-appctl dpctl/dump-flows | grep ct_mark | grep -v ipv6 -c], [1], [d
+@@ -7119,14 +6834,7 @@ AT_CHECK([ovs-appctl dpctl/dump-flows | grep ct_mark | grep -v ipv6 -c], [1], [d
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1908,7 +3053,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -7238,14 +6937,7 @@ NS_CHECK_EXEC([vm2], [ping -q -c 3 -i 0.3 -w 2 172.18.2.10 | FORMAT_PING], \
+@@ -7238,14 +6946,7 @@ NS_CHECK_EXEC([vm2], [ping -q -c 3 -i 0.3 -w 2 172.18.2.10 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1924,7 +3069,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
-@@ -7343,14 +7035,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.2.12 | FORMAT_PING], \
+@@ -7343,14 +7044,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.2.12 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1940,7 +3085,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -7553,14 +7238,7 @@ OVS_WAIT_UNTIL([test "1" = "$(grep -c "dl_dst=33:33:33:33:33:33" ovn-controller.
+@@ -7553,14 +7247,7 @@ OVS_WAIT_UNTIL([test "1" = "$(grep -c "dl_dst=33:33:33:33:33:33" ovn-controller.
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1956,7 +3101,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/.*error receiving.*/d
-@@ -7696,14 +7374,7 @@ icmp,orig=(src=10.0.0.3,dst=10.0.0.2,id=<cleared>,type=8,code=0),reply=(src=10.0
+@@ -7696,14 +7383,7 @@ icmp,orig=(src=10.0.0.3,dst=10.0.0.2,id=<cleared>,type=8,code=0),reply=(src=10.0
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1972,7 +3117,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -7838,14 +7509,7 @@ icmp,orig=(src=10.0.0.3,dst=10.0.0.2,id=<cleared>,type=8,code=0),reply=(src=10.0
+@@ -7838,14 +7518,7 @@ icmp,orig=(src=10.0.0.3,dst=10.0.0.2,id=<cleared>,type=8,code=0),reply=(src=10.0
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -1988,7 +3133,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -7939,14 +7603,7 @@ icmp,orig=(src=10.0.0.2,dst=10.0.0.3,id=<cleared>,type=8,code=0),reply=(src=10.0
+@@ -7939,14 +7612,7 @@ icmp,orig=(src=10.0.0.2,dst=10.0.0.3,id=<cleared>,type=8,code=0),reply=(src=10.0
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2004,7 +3149,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8040,14 +7697,7 @@ icmp,orig=(src=10.0.0.2,dst=10.0.0.3,id=<cleared>,type=8,code=0),reply=(src=10.0
+@@ -8040,14 +7706,7 @@ icmp,orig=(src=10.0.0.2,dst=10.0.0.3,id=<cleared>,type=8,code=0),reply=(src=10.0
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2020,7 +3165,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8134,14 +7784,7 @@ AT_CHECK([ip netns exec sw0p1 wget 20.0.0.3 -t 3 -T 1], [0], [ignore], [ignore])
+@@ -8134,14 +7793,7 @@ AT_CHECK([ip netns exec sw0p1 wget 20.0.0.3 -t 3 -T 1], [0], [ignore], [ignore])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2036,7 +3181,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8491,14 +8134,7 @@ check $PYTHON $srcdir/check_acl_log.py \
+@@ -8491,14 +8143,7 @@ check $PYTHON $srcdir/check_acl_log.py \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2052,7 +3197,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8620,14 +8256,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
+@@ -8620,14 +8265,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2068,7 +3213,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8682,14 +8311,7 @@ NS_CHECK_EXEC([sw0-p1.2], [ping -q -c 3 -i 0.3 -w 2 10.0.0.3 | FORMAT_PING], \
+@@ -8682,14 +8320,7 @@ NS_CHECK_EXEC([sw0-p1.2], [ping -q -c 3 -i 0.3 -w 2 10.0.0.3 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2084,7 +3229,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8771,14 +8393,7 @@ NS_CHECK_EXEC([ls1p1], [ping6 -q -c 3 -i 0.3 -w 2 1711::1  | FORMAT_PING], \
+@@ -8771,14 +8402,7 @@ NS_CHECK_EXEC([ls1p1], [ping6 -q -c 3 -i 0.3 -w 2 1711::1  | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2100,7 +3245,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8880,14 +8495,7 @@ AT_CHECK([grep -qE 'Too many active mcast flows' northd/ovn-northd.log], [1])
+@@ -8880,14 +8504,7 @@ AT_CHECK([grep -qE 'Too many active mcast flows' northd/ovn-northd.log], [1])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2116,7 +3261,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8949,14 +8557,7 @@ NS_CHECK_EXEC([vif0], [ping -q -c 3 -i 0.3 -w 1 192.168.20.1 | FORMAT_PING], \
+@@ -8949,14 +8566,7 @@ NS_CHECK_EXEC([vif0], [ping -q -c 3 -i 0.3 -w 1 192.168.20.1 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2132,7 +3277,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9151,14 +8752,7 @@ udp,orig=(src=192.168.10.10,dst=192.168.20.20,sport=<cleared>,dport=<cleared>),r
+@@ -9151,14 +8761,7 @@ udp,orig=(src=192.168.10.10,dst=192.168.20.20,sport=<cleared>,dport=<cleared>),r
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2148,7 +3293,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9295,14 +8889,7 @@ OVS_WAIT_UNTIL([
+@@ -9295,14 +8898,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2164,7 +3309,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9440,14 +9027,7 @@ OVS_WAIT_UNTIL([
+@@ -9440,14 +9036,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2180,7 +3325,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9565,14 +9145,7 @@ OVS_WAIT_UNTIL([
+@@ -9565,14 +9154,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2196,7 +3341,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9716,14 +9289,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
+@@ -9716,14 +9298,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2212,7 +3357,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9861,14 +9427,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
+@@ -9861,14 +9436,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2228,7 +3373,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9957,14 +9516,7 @@ NS_CHECK_EXEC([ns_ls1p1], [ping -q -c 3 -i 0.3 -w 2 10.89.189.1 | FORMAT_PING],
+@@ -9957,14 +9525,7 @@ NS_CHECK_EXEC([ns_ls1p1], [ping -q -c 3 -i 0.3 -w 2 10.89.189.1 | FORMAT_PING],
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2244,7 +3389,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10099,14 +9651,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 10.0.0.2 | FORMAT_PING], \
+@@ -10099,14 +9660,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 10.0.0.2 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2260,7 +3405,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10313,14 +9858,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(30.0.0.1) | sed -e 's/zone
+@@ -10313,14 +9867,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(30.0.0.1) | sed -e 's/zone
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2276,7 +3421,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10454,14 +9992,7 @@ NS_CHECK_EXEC([ns_ext1], [ping -q -c 3 -i 0.3 -w 2 172.0.0.88 | FORMAT_PING], \
+@@ -10454,14 +10001,7 @@ NS_CHECK_EXEC([ns_ext1], [ping -q -c 3 -i 0.3 -w 2 172.0.0.88 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2292,7 +3437,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10613,14 +10144,7 @@ OVS_WAIT_UNTIL([
+@@ -10613,14 +10153,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2308,7 +3453,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10781,14 +10305,7 @@ OVS_WAIT_UNTIL([
+@@ -10781,14 +10314,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2324,7 +3469,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10914,14 +10431,7 @@ OVS_WAIT_UNTIL([
+@@ -10914,14 +10440,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2340,7 +3485,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11258,14 +10768,7 @@ TMPPID=$(cat $OVS_RUNDIR/ovn-controller.pid)
+@@ -11258,14 +10777,7 @@ TMPPID=$(cat $OVS_RUNDIR/ovn-controller.pid)
  check ovs-appctl -t ovn-controller exit --restart
  OVS_WAIT_WHILE([kill -0 $TMPPID 2>/dev/null])
  
@@ -2356,7 +3501,7 @@ index 202f890b7..95754961b 100644
  
  AT_CLEANUP
  ])
-@@ -11418,14 +10921,7 @@ OVS_WAIT_UNTIL([
+@@ -11418,14 +10930,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2372,7 +3517,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11560,14 +11056,7 @@ acl_test to-lport "" pg
+@@ -11560,14 +11065,7 @@ acl_test to-lport "" pg
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2388,7 +3533,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11640,14 +11129,7 @@ tcp,orig=(src=10.0.0.2,dst=172.16.0.1,sport=<cleared>,dport=<cleared>),reply=(sr
+@@ -11640,14 +11138,7 @@ tcp,orig=(src=10.0.0.2,dst=172.16.0.1,sport=<cleared>,dport=<cleared>),reply=(sr
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2404,7 +3549,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11710,14 +11192,7 @@ check_row_count mac_binding 1 mac=\"00:00:00:00:00:02\"
+@@ -11710,14 +11201,7 @@ check_row_count mac_binding 1 mac=\"00:00:00:00:00:02\"
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2420,7 +3565,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11824,14 +11299,7 @@ OVS_WAIT_FOR_OUTPUT([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.1.151) |
+@@ -11824,14 +11308,7 @@ OVS_WAIT_FOR_OUTPUT([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.1.151) |
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2436,7 +3581,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12037,14 +11505,7 @@ OVS_WAIT_UNTIL([check_est_flows 0xa], [check established flows])
+@@ -12037,14 +11514,7 @@ OVS_WAIT_UNTIL([check_est_flows 0xa], [check established flows])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2452,7 +3597,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12122,14 +11583,7 @@ AT_CHECK([ovs-ofctl dump-flows br-int | grep 'table=78, n_packets' -c], [1], [dn
+@@ -12122,14 +11592,7 @@ AT_CHECK([ovs-ofctl dump-flows br-int | grep 'table=78, n_packets' -c], [1], [dn
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2468,7 +3613,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12212,14 +11666,7 @@ NS_CHECK_EXEC([sw1-p0], [ping -q -c 3 -i 0.3 -w 2 172.16.1.100 | FORMAT_PING], \
+@@ -12212,14 +11675,7 @@ NS_CHECK_EXEC([sw1-p0], [ping -q -c 3 -i 0.3 -w 2 172.16.1.100 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2484,7 +3629,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12322,14 +11769,7 @@ wait_row_count MAC_Binding 1 logical_port=lr1-pub ip=172.24.4.100
+@@ -12322,14 +11778,7 @@ wait_row_count MAC_Binding 1 logical_port=lr1-pub ip=172.24.4.100
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2500,7 +3645,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12414,14 +11854,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | grep -c "zone=$zone_id"], [0], [2
+@@ -12414,14 +11863,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | grep -c "zone=$zone_id"], [0], [2
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2516,7 +3661,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12509,12 +11942,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
+@@ -12509,12 +11951,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
  7 packets transmitted, 0 received, 100% packet loss, time 0ms
  ])
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
@@ -2530,7 +3675,7 @@ index 202f890b7..95754961b 100644
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
  /connection dropped.*/d"])
-@@ -12575,14 +12003,7 @@ NS_CHECK_EXEC([foo], [arping -q -c 3 172.16.1.100])
+@@ -12575,14 +12012,7 @@ NS_CHECK_EXEC([foo], [arping -q -c 3 172.16.1.100])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2546,7 +3691,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12708,14 +12129,7 @@ OVS_WAIT_UNTIL([
+@@ -12708,14 +12138,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -2562,7 +3707,7 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12853,14 +12267,7 @@ tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=
+@@ -12853,14 +12276,7 @@ tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=
  
  OVN_CLEANUP_CONTROLLER([hv1])
  
@@ -2578,16 +3723,151 @@ index 202f890b7..95754961b 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12972,14 +12379,7 @@ icmp,orig=(src=192.168.1.2,dst=192.168.1.1,id=<cleared>,type=8,code=0),reply=(sr
+@@ -12972,14 +12388,144 @@ icmp,orig=(src=192.168.1.2,dst=192.168.1.1,id=<cleared>,type=8,code=0),reply=(sr
  
  OVN_CLEANUP_CONTROLLER([hv1])
  
 -as ovn-sb
 -OVS_APP_EXIT_AND_WAIT([ovsdb-server])
--
++OVN_CLEANUP_NORTHD
+ 
 -as ovn-nb
 -OVS_APP_EXIT_AND_WAIT([ovsdb-server])
--
++as
++OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
++/connection dropped.*/d"])
++
++AT_CLEANUP
++])
++
++OVN_FOR_EACH_NORTHD([
++AT_SETUP([Distributed gw port CT zone allocation])
++AT_SKIP_IF([test $HAVE_NC = no])
++CHECK_CONNTRACK()
++
++ovn_start
++
++# Topo: vm1 -- ls -- lr  -- ext (with ACLs on ext_lr)
++
++OVS_TRAFFIC_VSWITCHD_START()
++ADD_BR([br-int])
++ADD_BR([br-ext], [set Bridge br-ext fail-mode=standalone])
++
++# Set external-ids in br-int needed for ovn-controller.
++check ovs-vsctl \
++        -- set Open_vSwitch . external-ids:system-id=hv1 \
++        -- set Open_vSwitch . external-ids:ovn-remote=unix:$ovs_base/ovn-sb/ovn-sb.sock \
++        -- set Open_vSwitch . external-ids:ovn-encap-type=geneve \
++        -- set Open_vSwitch . external-ids:ovn-encap-ip=169.0.0.1 \
++        -- set bridge br-int fail-mode=secure other-config:disable-in-band=true \
++        -- set Open_vSwitch . external-ids:ovn-bridge-mappings=phynet:br-ext
++
++start_daemon ovn-controller
++
++# Create logical switches: internal and external networks.
++check ovn-nbctl ls-add ls
++check ovn-nbctl ls-add ext
++
++# Add localnet port to external switch for physical connectivity.
++check ovn-nbctl lsp-add-localnet-port ext ln_port phynet
++
++# Add VM port to internal switch.
++check ovn-nbctl lsp-add ls vm1 \
++    -- lsp-set-addresses vm1 "00:00:00:00:00:11 192.168.100.11"
++
++# Create logical_router_ports: lr_ls and lr_ext.
++check ovn-nbctl lr-add lr
++check ovn-nbctl lrp-add lr lr_ls 00:00:00:00:01:01 192.168.100.1/24
++check ovn-nbctl lrp-add lr lr_ext 00:00:00:00:01:02 172.16.0.1/24
++check ovn-nbctl lrp-set-gateway-chassis lr_ext hv1
++
++# Create peer logical_switch_ports: ls_lr and ext_lr.
++check ovn-nbctl lsp-add ls ls_lr \
++    -- lsp-set-type ls_lr router \
++    -- lsp-set-addresses ls_lr router \
++    -- lsp-set-options ls_lr router-port=lr_ls
++
++check ovn-nbctl lsp-add ext ext_lr \
++    -- lsp-set-type ext_lr router \
++    -- lsp-set-addresses ext_lr router \
++    -- lsp-set-options ext_lr router-port=lr_ext enable_router_port_acl=true
++
++# Create port group for external gateway ACLs.
++check ovn-nbctl pg-add gw_pg ext_lr
++
++# Add ACL rule to enable connection tracking for external gateway traffic
++# allowing ICMP from vm1 to external.
++check ovn-nbctl acl-add gw_pg from-lport 2001 "inport == @gw_pg && ip4  && icmp4" allow-related
++check ovn-nbctl acl-add gw_pg from-lport 1001 "inport == @gw_pg && ip4" drop
++check ovn-nbctl acl-add gw_pg to-lport 1001 "outport == @gw_pg && ip4" drop
++
++# Create namespace vm1.
++ADD_NAMESPACES(vm1)
++ADD_VETH(vm1, vm1, br-int, "192.168.100.11/24", "00:00:00:00:00:11", \
++         "192.168.100.1")
++
++# Create namespace external.
++ADD_NAMESPACES(external)
++ADD_VETH(external, external, br-ext, "172.16.0.100/24", "00:00:00:00:01:10", \
++         "172.16.0.1")
++
++wait_for_ports_up
++check ovn-nbctl --wait=hv sync
++
++# Check that ext_lr has enable_router_port_acl option.
++AT_CHECK([ovn-sbctl get Port_Binding ext_lr options:enable_router_port_acl], [0], [dnl
++"true"
++])
++
++# Check that ls_lr does not have enable_router_port_acl option.
++AT_CHECK([ovn-sbctl --columns options list Port_Binding ls_lr | grep -q enable_router_port_acl], [1], [])
++
++# Check allocated CT zone for ext_lr.
++AT_CHECK([ovn-appctl -t ovn-controller ct-zone-list | sed "s/ [[0-9]]*/ ??/"], [0], [stdout])
++AT_CHECK([grep "ext_lr" stdout], [0], [dnl
++ext_lr ??
++])
++
++# Check no CT zone for ls_lr.
++AT_CHECK([grep "ls_lr" stdout], [1], [])
++
++# Generate ICMP traffic to create conntrack entries.
++NS_CHECK_EXEC([vm1], [ping -q -c 2 -W 1 172.16.0.100 | FORMAT_PING], \
++[0], [dnl
++2 packets transmitted, 2 received, 0% packet loss, time 0ms
++])
++
++# Check that ICMP conntrack entries exist.
++zone_id=$(ovn-appctl -t ovn-controller ct-zone-list | grep ext_lr | cut -d ' ' -f2)
++AT_CHECK_UNQUOTED([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.0.100) | grep "zone=$zone_id"], [0], [dnl
++icmp,orig=(src=192.168.100.11,dst=172.16.0.100,id=<cleared>,type=8,code=0),reply=(src=172.16.0.100,dst=192.168.100.11,id=<cleared>,type=0,code=0),zone=$zone_id
++])
++
++# Test TCP traffic - should be blocked by ACLs.
++NETNS_DAEMONIZE([external], [nc -l -k 172.16.0.100 80], [external.pid])
++NS_CHECK_EXEC([vm1], [nc -z 172.16.0.100 80], [1])
++
++# Remove enable_router_port_acl and verify CT zone release.
++check ovn-nbctl lsp-set-options ext_lr router-port=lr_ext
++check ovn-nbctl --wait=sb sync
++AT_CHECK([ovn-appctl -t ovn-controller ct-zone-list | grep "ext_lr"], [1], [])
++
++# Re-enable enable_router_port_acl and verify CT zone reallocation.
++check ovn-nbctl lsp-set-options ext_lr router-port=lr_ext enable_router_port_acl=true
++check ovn-nbctl --wait=sb sync
++AT_CHECK([ovn-appctl -t ovn-controller ct-zone-list | sed "s/ [[0-9]]*/ ??/"], [0], [stdout])
++AT_CHECK([grep "ext_lr" stdout], [0], [dnl
++ext_lr ??
++])
++
++# Test ICMP traffic still works after dynamic ACL changes
++NS_CHECK_EXEC([vm1], [ping -q -c 2 -W 1 172.16.0.100 | FORMAT_PING], \
++[0], [dnl
++2 packets transmitted, 2 received, 0% packet loss, time 0ms
++])
++
++OVS_APP_EXIT_AND_WAIT([ovn-controller])
+ 
 -as northd
 -OVS_APP_EXIT_AND_WAIT([ovn-northd])
 +OVN_CLEANUP_NORTHD
