@@ -22,11 +22,48 @@ index 7577d5700..a28106ca0 100644
  AC_CONFIG_MACRO_DIR([m4])
  AC_CONFIG_AUX_DIR([build-aux])
  AC_CONFIG_HEADERS([config.h])
+diff --git a/controller-vtep/ovn-controller-vtep.c b/controller-vtep/ovn-controller-vtep.c
+index 4472e5285..99e0afc7d 100644
+--- a/controller-vtep/ovn-controller-vtep.c
++++ b/controller-vtep/ovn-controller-vtep.c
+@@ -254,6 +254,7 @@ main(int argc, char *argv[])
+     ovsdb_idl_loop_destroy(&vtep_idl_loop);
+     ovsdb_idl_loop_destroy(&ovnsb_idl_loop);
+ 
++    free(ovn_version);
+     free(ovnsb_remote);
+     free(vtep_remote);
+     free(default_db_);
 diff --git a/controller/binding.c b/controller/binding.c
-index b0ca6b638..a4e05f865 100644
+index b0ca6b638..199d08915 100644
 --- a/controller/binding.c
 +++ b/controller/binding.c
-@@ -782,6 +782,16 @@ update_active_pb_ras_pd(const struct sbrec_port_binding *pb,
+@@ -296,18 +296,17 @@ add_ovs_qos_table_entry(struct ovsdb_idl_txn *ovs_idl_txn,
+         smap_clear(&external_ids);
+     }
+ 
+-    struct ovsrec_queue *queue;
+-    size_t i;
+-    for (i = 0; i < qos->n_queues; i++) {
+-        queue = qos->value_queues[i];
+-
+-        const char *p = smap_get(&queue->external_ids, "ovn_port");
++    struct ovsrec_queue *queue = NULL;
++    for (size_t i = 0; i < qos->n_queues; i++) {
++        const char *p =
++            smap_get(&qos->value_queues[i]->external_ids, "ovn_port");
+         if (p && !strcmp(p, ovn_port)) {
++            queue = qos->value_queues[i];
+             break;
+         }
+     }
+ 
+-    if (i == qos->n_queues) {
++    if (!queue) {
+         queue = ovsrec_queue_insert(ovs_idl_txn);
+         ovsrec_qos_update_queues_setkey(qos, queue_id, queue);
+     }
+@@ -782,6 +781,16 @@ update_active_pb_ras_pd(const struct sbrec_port_binding *pb,
      }
  }
  
@@ -43,7 +80,7 @@ index b0ca6b638..a4e05f865 100644
  static struct local_binding *local_binding_create(
      const char *name, const struct ovsrec_interface *);
  static void local_binding_add(struct shash *local_bindings,
-@@ -2109,6 +2119,11 @@ binding_run(struct binding_ctx_in *b_ctx_in, struct binding_ctx_out *b_ctx_out)
+@@ -2109,6 +2118,11 @@ binding_run(struct binding_ctx_in *b_ctx_in, struct binding_ctx_out *b_ctx_out)
          switch (lport_type) {
          case LP_PATCH:
              update_related_lport(pb, b_ctx_out);
@@ -55,7 +92,7 @@ index b0ca6b638..a4e05f865 100644
              break;
          case LP_VTEP:
              update_related_lport(pb, b_ctx_out);
-@@ -2970,6 +2985,20 @@ handle_updated_port(struct binding_ctx_in *b_ctx_in,
+@@ -2970,6 +2984,20 @@ handle_updated_port(struct binding_ctx_in *b_ctx_in,
      case LP_PATCH:
          update_related_lport(pb, b_ctx_out);
          consider_patch_port_for_local_datapaths(pb, b_ctx_in, b_ctx_out);
@@ -76,6 +113,49 @@ index b0ca6b638..a4e05f865 100644
          break;
  
      case LP_VTEP:
+diff --git a/controller/lflow.c b/controller/lflow.c
+index 75789283c..a0782ff87 100644
+--- a/controller/lflow.c
++++ b/controller/lflow.c
+@@ -2605,28 +2605,14 @@ build_in_port_sec_default_flows(const struct sbrec_port_binding *pb,
+     /* Add the below logical flow equivalent OF rules in 'in_port_sec_nd' table
+      * priority: 80
+      * match - "inport == pb->logical_port && icmp6 && icmp6.code == 135"
+-     * action - "port_sec_failed = 0;"
++     * action - "port_sec_failed = 1;"
+      * description: "Default allow all IPv6 NS packets"
+-     * note: This is a hack for now.  Ideally we should do default drop.
+-     *       There seems to be a bug in ovs-vswitchd which needs further
+-     *       investigation.
+-     *
+-     * Eg.  If there are below OF rules in the same table
+-     * (1) priority=90,icmp6,reg14=0x1,metadata=0x1,nw_ttl=255,icmp_type=135,
+-     *     icmp_code=0,nd_sll=fa:16:3e:94:05:98
+-     *     actions=load:0->NXM_NX_REG10[12]
+-     * (2) priority=80,icmp6,reg14=0x1,metadata=0x1,nw_ttl=255,icmp_type=135,
+-     *     icmp_code=0 actions=load:1->NXM_NX_REG10[12]
+-     *
+-     * An IPv6 NS packet with nd_sll = fa:16:3e:94:05:98 is matching on the
+-     * second prio-80 flow instead of the first one.
++     * note: "Higher priority flows are added to allow the legit NS packets.
+      */
+     match_set_dl_type(m, htons(ETH_TYPE_IPV6));
+     match_set_nw_proto(m, IPPROTO_ICMPV6);
+     match_set_nw_ttl(m, 255);
+     match_set_icmp_type(m, 135);
+-    build_port_sec_allow_action(ofpacts); /*TODO:  Change this to
+-                                           * build_port_sec_deny_action(). */
+     ofctrl_add_flow(flow_table, OFTABLE_CHK_IN_PORT_SEC_ND, 80,
+                     pb->header_.uuid.parts[0], m, ofpacts,
+                     &pb->header_.uuid);
+@@ -2945,6 +2931,7 @@ build_in_port_sec_nd_flows(const struct sbrec_port_binding *pb,
+             match_set_dl_src(m, ps_addr->ea);
+             match_set_dl_type(m, htons(ETH_TYPE_IPV6));
+             match_set_nw_proto(m, IPPROTO_ICMPV6);
++            match_set_nw_ttl(m, 255);
+             match_set_icmp_type(m, 136);
+             match_set_icmp_code(m, 0);
+             match_set_arp_tha(m, eth_addr_zero);
 diff --git a/controller/ovn-controller.c b/controller/ovn-controller.c
 index 72f80d28e..a443e867a 100644
 --- a/controller/ovn-controller.c
@@ -113,7 +193,7 @@ index 72f80d28e..a443e867a 100644
              }
  
 diff --git a/controller/pinctrl.c b/controller/pinctrl.c
-index 3774544a8..421ab24e6 100644
+index 3774544a8..f48475004 100644
 --- a/controller/pinctrl.c
 +++ b/controller/pinctrl.c
 @@ -165,6 +165,7 @@ VLOG_DEFINE_THIS_MODULE(pinctrl);
@@ -168,6 +248,39 @@ index 3774544a8..421ab24e6 100644
  
      latch_init(&pinctrl.pinctrl_thread_exit);
      pinctrl.pinctrl_thread = ovs_thread_create("ovn_pinctrl", pinctrl_handler,
+@@ -2320,7 +2322,7 @@ exit:
+ }
+ 
+ static void
+-encode_dhcpv6_server_id_opt(struct ofpbuf *opts, struct eth_addr *mac)
++encode_dhcpv6_server_id_opt(struct ofpbuf *opts, void *user_data)
+ {
+     /* The Server Identifier option carries a DUID
+      * identifying a server between a client and a server.
+@@ -2328,15 +2330,15 @@ encode_dhcpv6_server_id_opt(struct ofpbuf *opts, struct eth_addr *mac)
+      *
+      * We use DUID Based on Link-layer Address [DUID-LL].
+      */
+-    struct dhcpv6_opt_server_id *server_id =
+-            ofpbuf_put_zeros(opts, sizeof *server_id);
+-    *server_id = (struct dhcpv6_opt_server_id) {
+-            .opt.code = htons(DHCPV6_OPT_SERVER_ID_CODE),
+-            .opt.len = htons(DHCP6_OPT_SERVER_ID_LEN - DHCP6_OPT_HEADER_LEN),
+-            .duid_type = htons(DHCPV6_DUID_LL),
+-            .hw_type = htons(DHCPV6_HW_TYPE_ETH),
+-            .mac = *mac
++    struct dhcpv6_opt_server_id server_id = {
++        .opt.code = htons(DHCPV6_OPT_SERVER_ID_CODE),
++        .opt.len = htons(DHCP6_OPT_SERVER_ID_LEN - DHCP6_OPT_HEADER_LEN),
++        .duid_type = htons(DHCPV6_DUID_LL),
++        .hw_type = htons(DHCPV6_HW_TYPE_ETH),
+     };
++    memcpy(&server_id.mac, user_data, sizeof server_id.mac);
++
++    ofpbuf_put(opts, &server_id, sizeof server_id);
+ }
+ 
+ static bool
 @@ -3641,6 +3643,9 @@ pinctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
              struct if_status_mgr *mgr)
  {
@@ -374,8 +487,16 @@ index 5362ff3d9..14f3fe0f4 100644
  ovn (24.03.7-1) unstable; urgency=low
     [ OVN team ]
     * New upstream version
+diff --git a/dummy_file b/dummy_file
+new file mode 100644
+index 000000000..c30a34c73
+--- /dev/null
++++ b/dummy_file
+@@ -0,0 +1 @@
++2026-01-24 00:00:45.185446
+\ No newline at end of file
 diff --git a/northd/northd.c b/northd/northd.c
-index ffd086658..4a74ef15a 100644
+index ffd086658..b877fa188 100644
 --- a/northd/northd.c
 +++ b/northd/northd.c
 @@ -3258,6 +3258,11 @@ ovn_port_update_sbrec(struct ovsdb_idl_txn *ovnsb_txn,
@@ -390,7 +511,20 @@ index ffd086658..4a74ef15a 100644
                  }
                  if (chassis) {
                      smap_add(&new, "l3gateway-chassis", chassis);
-@@ -4986,6 +4991,12 @@ northd_handle_sb_port_binding_changes(
+@@ -4091,6 +4096,12 @@ static bool
+ ovn_port_assign_requested_tnl_id(
+     const struct sbrec_chassis_table *sbrec_chassis_table, struct ovn_port *op)
+ {
++    /* Skip the assignment for CR port, as it references the same nbrp as the
++     * LRP and the tunnel key should be reserved by the original port only. */
++    if (is_cr_port(op)) {
++        return true;
++    }
++
+     const struct smap *options = (op->nbsp
+                                   ? &op->nbsp->options
+                                   : &op->nbrp->options);
+@@ -4986,6 +4997,12 @@ northd_handle_sb_port_binding_changes(
      const struct sbrec_port_binding *pb;
      static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(1, 5);
      SBREC_PORT_BINDING_TABLE_FOR_EACH_TRACKED (pb, sbrec_port_binding_table) {
@@ -403,6 +537,299 @@ index ffd086658..4a74ef15a 100644
          bool is_router_port = is_pb_router_type(pb);
          struct ovn_port *op = NULL;
  
+@@ -14180,7 +14197,7 @@ build_misc_local_traffic_drop_flows_for_lrouter(
+                   lflow_ref);
+ 
+     /* TTL discard */
+-    ovn_lflow_add(lflows, od, S_ROUTER_IN_IP_INPUT, 30,
++    ovn_lflow_add(lflows, od, S_ROUTER_IN_IP_INPUT, 29,
+                   "ip.ttl == {0, 1}", debug_drop_action(),
+                   lflow_ref);
+ 
+@@ -14212,6 +14229,153 @@ build_dhcpv6_reply_flows_for_lrouter_port(
+     }
+ }
+ 
++static void
++build_lrouter_ipv4_default_ttl_expired_flows(
++    struct ovn_port *op, struct lflow_table *lflows,
++    struct ds *match, struct ds *actions,
++    const struct shash *meter_groups,
++    struct lflow_ref *lflow_ref)
++{
++    if (!op->lrp_networks.n_ipv4_addrs) {
++        return;
++    }
++
++    struct ds ip_ds = DS_EMPTY_INITIALIZER;
++    for (int i = 0; i < op->lrp_networks.n_ipv4_addrs; i++) {
++        ds_clear(match);
++        ds_clear(actions);
++        ds_clear(&ip_ds);
++        if (is_l3dgw_port(op)) {
++            ds_put_cstr(&ip_ds, "ip4.dst <-> ip4.src");
++        } else {
++            ds_put_format(&ip_ds, "ip4.dst = ip4.src; ip4.src = %s",
++                          op->lrp_networks.ipv4_addrs[i].addr_s);
++        }
++        ds_put_format(match,
++                      "inport == %s && ip4 && "
++                      "ip4.src == %s/%d && "
++                      "ip.ttl == {0, 1} && !ip.later_frag",
++                      op->json_key,
++                      op->lrp_networks.ipv4_addrs[i].network_s,
++                      op->lrp_networks.ipv4_addrs[i].plen);
++        ds_put_format(actions,
++                      "icmp4 {"
++                      "eth.dst <-> eth.src; "
++                      "icmp4.type = 11; /* Time exceeded */ "
++                      "icmp4.code = 0; /* TTL exceeded in transit */ "
++                      "%s ; ip.ttl = 254; "
++                      "outport = %s; flags.loopback = 1; output; };",
++                      ds_cstr(&ip_ds), op->json_key);
++        ovn_lflow_add_with_hint__(lflows, op->od, S_ROUTER_IN_IP_INPUT, 31,
++                                  ds_cstr(match), ds_cstr(actions), NULL,
++                                  copp_meter_get(COPP_ICMP4_ERR,
++                                                 op->od->nbr->copp,
++                                                 meter_groups),
++                                  &op->nbrp->header_, lflow_ref);
++    }
++    ds_destroy(&ip_ds);
++    ds_clear(match);
++    ds_clear(actions);
++
++    /* Default flow for IPv4 packets with expired TTL (0 or 1).
++     * Generate ICMPv4 Time Exceeded reply using the first IPv4 address
++     * of the logical router port as source address. */
++    ds_put_format(match,
++                  "inport == %s && ip4 && "
++                  "ip.ttl == {0, 1} && !ip.later_frag",
++                  op->json_key);
++    ds_put_format(actions,
++                  "icmp4 {"
++                  "eth.dst <-> eth.src; "
++                  "icmp4.type = 11; /* Time exceeded */ "
++                  "icmp4.code = 0; /* TTL exceeded in transit */ "
++                  "ip4.dst = ip4.src; ip4.src = %s; ip.ttl = 254; "
++                   "outport = %s; flags.loopback = 1; output; };",
++                   op->lrp_networks.ipv4_addrs[0].addr_s,
++                   op->json_key);
++    ovn_lflow_add_with_hint__(lflows, op->od, S_ROUTER_IN_IP_INPUT, 30,
++                              ds_cstr(match), ds_cstr(actions), NULL,
++                              copp_meter_get(COPP_ICMP4_ERR,
++                                             op->od->nbr->copp,
++                                             meter_groups),
++                              &op->nbrp->header_, lflow_ref);
++}
++
++static void
++build_lrouter_ipv6_default_ttl_expired_flows(
++    struct ovn_port *op, struct lflow_table *lflows,
++    struct ds *match, struct ds *actions,
++    const struct shash *meter_groups,
++    struct lflow_ref *lflow_ref)
++{
++    /* Early return if no IPv6 addresses are configured.
++     * Note: op->lrp_networks.ipv6_addrs will always have LLA and that
++     * will be last in the list. */
++    if (op->lrp_networks.n_ipv6_addrs < 1) {
++        return;
++    }
++
++    struct ds ip_ds = DS_EMPTY_INITIALIZER;
++    for (size_t i = 0; i < op->lrp_networks.n_ipv6_addrs - 1; i++) {
++        ds_clear(match);
++        ds_clear(actions);
++        ds_clear(&ip_ds);
++        if (is_l3dgw_port(op)) {
++            ds_put_cstr(&ip_ds, "ip6.dst <-> ip6.src");
++        } else {
++            ds_put_format(&ip_ds, "ip6.dst = ip6.src; ip6.src = %s",
++                          op->lrp_networks.ipv6_addrs[i].addr_s);
++        }
++        ds_put_format(match,
++                      "inport == %s && ip6 && "
++                      "ip6.src == %s/%d && "
++                      "ip.ttl == {0, 1} && !ip.later_frag",
++                      op->json_key,
++                      op->lrp_networks.ipv6_addrs[i].network_s,
++                      op->lrp_networks.ipv6_addrs[i].plen);
++        ds_put_format(actions,
++                      "icmp6 {"
++                      "eth.dst <-> eth.src; "
++                      "%s ; ip.ttl = 254; "
++                      "icmp6.type = 3; /* Time exceeded */ "
++                      "icmp6.code = 0; /* TTL exceeded in transit */ "
++                      "outport = %s; flags.loopback = 1; output; };",
++                      ds_cstr(&ip_ds), op->json_key);
++        ovn_lflow_add_with_hint__(lflows, op->od, S_ROUTER_IN_IP_INPUT, 31,
++                                  ds_cstr(match), ds_cstr(actions), NULL,
++                                  copp_meter_get(COPP_ICMP6_ERR,
++                                                 op->od->nbr->copp,
++                                                 meter_groups),
++                                  &op->nbrp->header_, lflow_ref);
++    }
++    ds_destroy(&ip_ds);
++    ds_clear(match);
++    ds_clear(actions);
++
++    /* Default flow for IPv6 packets with expired TTL (0 or 1).
++     * Generate ICMPv6 Time Exceeded reply using the first IPv6 address
++     * of the logical router port as source address. */
++    ds_put_format(match,
++                  "inport == %s && ip6 && "
++                  "ip.ttl == {0, 1} && !ip.later_frag",
++                  op->json_key);
++    ds_put_format(actions,
++                  "icmp6 {"
++                  "eth.dst <-> eth.src; "
++                  "ip6.dst = ip6.src; ip6.src = %s; "
++                  "ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ "
++                  "icmp6.code = 0; /* TTL exceeded in transit */ "
++                  "outport = %s; flags.loopback = 1; output; };",
++                  op->lrp_networks.ipv6_addrs[0].addr_s,
++                  op->json_key);
++    ovn_lflow_add_with_hint__(lflows, op->od, S_ROUTER_IN_IP_INPUT, 30,
++                              ds_cstr(match), ds_cstr(actions), NULL,
++                              copp_meter_get(COPP_ICMP6_ERR,
++                                             op->od->nbr->copp,
++                                             meter_groups),
++                              &op->nbrp->header_,  lflow_ref);
++}
++
+ static void
+ build_ipv6_input_flows_for_lrouter_port(
+         struct ovn_port *op, struct lflow_table *lflows,
+@@ -14346,44 +14510,9 @@ build_ipv6_input_flows_for_lrouter_port(
+     }
+ 
+     /* ICMPv6 time exceeded */
+-    struct ds ip_ds = DS_EMPTY_INITIALIZER;
+-    for (int i = 0; i < op->lrp_networks.n_ipv6_addrs; i++) {
+-        /* skip link-local address */
+-        if (in6_is_lla(&op->lrp_networks.ipv6_addrs[i].network)) {
+-            continue;
+-        }
+-
+-        ds_clear(match);
+-        ds_clear(actions);
+-        ds_clear(&ip_ds);
+-        if (is_l3dgw_port(op)) {
+-            ds_put_cstr(&ip_ds, "ip6.dst <-> ip6.src");
+-        } else {
+-            ds_put_format(&ip_ds, "ip6.dst = ip6.src; ip6.src = %s",
+-                          op->lrp_networks.ipv6_addrs[i].addr_s);
+-        }
+-        ds_put_format(match,
+-                      "inport == %s && ip6 && "
+-                      "ip6.src == %s/%d && "
+-                      "ip.ttl == {0, 1} && !ip.later_frag",
+-                      op->json_key,
+-                      op->lrp_networks.ipv6_addrs[i].network_s,
+-                      op->lrp_networks.ipv6_addrs[i].plen);
+-        ds_put_format(actions,
+-                      "icmp6 {"
+-                      "eth.dst <-> eth.src; "
+-                      "%s ; ip.ttl = 254; "
+-                      "icmp6.type = 3; /* Time exceeded */ "
+-                      "icmp6.code = 0; /* TTL exceeded in transit */ "
+-                      "outport = %s; flags.loopback = 1; output; };",
+-                      ds_cstr(&ip_ds), op->json_key);
+-        ovn_lflow_add_with_hint__(lflows, op->od, S_ROUTER_IN_IP_INPUT,
+-                31, ds_cstr(match), ds_cstr(actions), NULL,
+-                copp_meter_get(COPP_ICMP6_ERR, op->od->nbr->copp,
+-                               meter_groups),
+-                &op->nbrp->header_, lflow_ref);
+-    }
+-    ds_destroy(&ip_ds);
++    build_lrouter_ipv6_default_ttl_expired_flows(op, lflows,
++                                                 match, actions,
++                                                 meter_groups, lflow_ref);
+ }
+ 
+ static void
+@@ -14491,36 +14620,9 @@ build_lrouter_ipv4_ip_input(struct ovn_port *op,
+     build_lrouter_bfd_flows(lflows, op, meter_groups, lflow_ref);
+ 
+     /* ICMP time exceeded */
+-    struct ds ip_ds = DS_EMPTY_INITIALIZER;
+-    for (int i = 0; i < op->lrp_networks.n_ipv4_addrs; i++) {
+-        ds_clear(match);
+-        ds_clear(actions);
+-        ds_clear(&ip_ds);
+-        if (is_l3dgw_port(op)) {
+-            ds_put_cstr(&ip_ds, "ip4.dst <-> ip4.src");
+-        } else {
+-            ds_put_format(&ip_ds, "ip4.dst = ip4.src; ip4.src = %s",
+-                          op->lrp_networks.ipv4_addrs[i].addr_s);
+-        }
+-        ds_put_format(match,
+-                      "inport == %s && ip4 && "
+-                      "ip.ttl == {0, 1} && !ip.later_frag", op->json_key);
+-        ds_put_format(actions,
+-                      "icmp4 {"
+-                      "eth.dst <-> eth.src; "
+-                      "icmp4.type = 11; /* Time exceeded */ "
+-                      "icmp4.code = 0; /* TTL exceeded in transit */ "
+-                      "%s ; ip.ttl = 254; "
+-                      "outport = %s; flags.loopback = 1; output; };",
+-                      ds_cstr(&ip_ds), op->json_key);
+-        ovn_lflow_add_with_hint__(lflows, op->od, S_ROUTER_IN_IP_INPUT,
+-                31, ds_cstr(match), ds_cstr(actions), NULL,
+-                copp_meter_get(COPP_ICMP4_ERR, op->od->nbr->copp,
+-                               meter_groups),
+-                &op->nbrp->header_, lflow_ref);
+-
+-    }
+-    ds_destroy(&ip_ds);
++    build_lrouter_ipv4_default_ttl_expired_flows(op, lflows,
++                                                 match, actions,
++                                                 meter_groups, lflow_ref);
+ 
+     /* ARP reply.  These flows reply to ARP requests for the router's own
+      * IP address. */
+diff --git a/tests/check_acl_log.py b/tests/check_acl_log.py
+index 0c1968b2e..2cc241459 100644
+--- a/tests/check_acl_log.py
++++ b/tests/check_acl_log.py
+@@ -10,16 +10,13 @@ def strip(val):
+ 
+ def parse_acl_log(line):
+     """Convert an ACL log string into a dict"""
+-    # First cut off the logging preamble.
+-    # We're assuming the default log format.
+     acl_log = {}
+-    _, _, details = line.rpartition("|")
+ 
+     # acl_details are things like the acl name, direction,
+     # verdict, and severity. packet_details are things like
+     # the protocol, addresses, and ports of the packet being
+     # logged.
+-    acl_details, _, packet_details = details.partition(":")
++    acl_details, _, packet_details = line.partition(":")
+     for datum in acl_details.split(","):
+         name, _, value = datum.rpartition("=")
+         acl_log[strip(name)] = strip(value)
+@@ -37,8 +34,10 @@ def parse_acl_log(line):
+ 
+ def get_acl_log(entry_num=1):
+     with open("ovn-controller.log", "r") as controller_log:
+-        acl_logs = [line.rstrip() for line in controller_log
++        # Cut off the logging preamble, so we can sort logs properly.
++        acl_logs = [line.split('|', 4)[-1].rstrip() for line in controller_log
+                     if "acl_log" in line]
++        acl_logs.sort()
+         try:
+             return acl_logs[entry_num - 1]
+         except IndexError:
+@@ -55,6 +54,7 @@ def add_parser_args(parser):
+     # There are other possible things that can be in an ACL log,
+     # and if we need those in the future, we can add them later.
+     parser.add_argument("--name")
++    parser.add_argument("--direction")
+     parser.add_argument("--verdict")
+     parser.add_argument("--severity")
+     parser.add_argument("--protocol")
 diff --git a/tests/ovn-controller-vtep.at b/tests/ovn-controller-vtep.at
 index 22fccdbf1..3a0ff0537 100644
 --- a/tests/ovn-controller-vtep.at
@@ -706,7 +1133,7 @@ index b9d2e01ed..25c85889b 100644
  #
  # Gracefully terminate vswitch daemons in the
 diff --git a/tests/ovn-northd.at b/tests/ovn-northd.at
-index a29bf0b58..4a4f962a8 100644
+index a29bf0b58..53917012f 100644
 --- a/tests/ovn-northd.at
 +++ b/tests/ovn-northd.at
 @@ -151,6 +151,7 @@ check_row_count HA_Chassis 0
@@ -1447,7 +1874,26 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -7390,6 +7452,7 @@ AT_CHECK([grep -e 'lr_in_ip_routing   ' lrflows | grep -e 'igmp' -e 'mld' | sed
+@@ -7371,11 +7433,15 @@ AT_CHECK([grep -e 'lr_in_ip_input    ' lrflows | grep -e 'igmp' -e 'mld' -e 'ip.
+   table=??(lr_in_ip_input     ), priority=120  , match=((mldv1 || mldv2) && ip.ttl == 1), action=(next;)
+   table=??(lr_in_ip_input     ), priority=120  , match=(igmp && ip.ttl == 1), action=(next;)
+   table=??(lr_in_ip_input     ), priority=32   , match=(ip.ttl == {0, 1} && !ip.later_frag && (ip4.mcast || ip6.mcast)), action=(drop;)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lrp1" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.10.10.1 ; ip.ttl = 254; outport = "lrp1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lrp1" && ip4 && ip4.src == 10.10.10.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.10.10.1 ; ip.ttl = 254; outport = "lrp1"; flags.loopback = 1; output; };)
+   table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lrp1" && ip6 && ip6.src == 1010::/64 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = 1010::1 ; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lrp1"; flags.loopback = 1; output; };)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lrp2" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.20.20.1 ; ip.ttl = 254; outport = "lrp2"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lrp2" && ip4 && ip4.src == 20.20.20.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.20.20.1 ; ip.ttl = 254; outport = "lrp2"; flags.loopback = 1; output; };)
+   table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lrp2" && ip6 && ip6.src == 2020::/64 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = 2020::1 ; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lrp2"; flags.loopback = 1; output; };)
+-  table=??(lr_in_ip_input     ), priority=30   , match=(ip.ttl == {0, 1}), action=(drop;)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lrp1" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.10.10.1; ip.ttl = 254; outport = "lrp1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lrp1" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = 1010::1; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lrp1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lrp2" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.20.20.1; ip.ttl = 254; outport = "lrp2"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lrp2" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = 2020::1; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lrp2"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=29   , match=(ip.ttl == {0, 1}), action=(drop;)
+ ])
+ 
+ dnl Flows to "route" (statically forward) without decrementing TTL for
+@@ -7390,6 +7456,7 @@ AT_CHECK([grep -e 'lr_in_ip_routing   ' lrflows | grep -e 'igmp' -e 'mld' | sed
    table=??(lr_in_ip_routing   ), priority=10460, match=(mldv1 || mldv2), action=(clone { outport = "_MC_static"; next; };)
  ])
  
@@ -1455,7 +1901,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -7573,6 +7636,7 @@ AT_CHECK([grep -e "ls_in_stateful" lsflows | sed 's/table=../table=??/' | sort],
+@@ -7573,6 +7640,7 @@ AT_CHECK([grep -e "ls_in_stateful" lsflows | sed 's/table=../table=??/' | sort],
    table=??(ls_in_stateful     ), priority=100  , match=(reg0[[1]] == 1 && reg0[[13]] == 1), action=(ct_commit { ct_mark.blocked = 0; ct_label.label = reg3; }; next;)
  ])
  
@@ -1463,7 +1909,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -7765,6 +7829,7 @@ check ovn-nbctl --wait=sb lr-nat-del DR dnat_and_snat
+@@ -7765,6 +7833,7 @@ check ovn-nbctl --wait=sb lr-nat-del DR dnat_and_snat
  AT_CHECK([ovn-sbctl dump-flows DR | grep -e lr_in_unsnat -e lr_out_snat -e lr_in_dnat -e lr_out_undnat | grep ct_snat| wc -l], [0], [0
  ])
  
@@ -1471,7 +1917,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -7812,6 +7877,7 @@ check ovn-nbctl lrp-del lr-lrp -- lr-del lr -- lr-add lr -- lrp-add lr lr-lrp 00
+@@ -7812,6 +7881,7 @@ check ovn-nbctl lrp-del lr-lrp -- lr-del lr -- lr-add lr -- lrp-add lr lr-lrp 00
  wait_row_count sb:Static_MAC_Binding 1
  check ovn-nbctl --wait=sb sync
  
@@ -1479,7 +1925,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -7839,6 +7905,7 @@ AT_CHECK([cat lrflows | grep -e lr_in_lookup_neighbor -e lr_in_learn_neighbor |
+@@ -7839,6 +7909,7 @@ AT_CHECK([cat lrflows | grep -e lr_in_lookup_neighbor -e lr_in_learn_neighbor |
    table=2 (lr_in_learn_neighbor), priority=95   , match=(nd_ns && (ip6.src == 0 || nd.sll == 0)), action=(next;)
  ])
  
@@ -1487,7 +1933,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -8484,6 +8551,7 @@ AT_CHECK_UNQUOTED([ovn_trace --ct new --ct new --minimal ls "${flow}"], [0], [dn
+@@ -8484,6 +8555,7 @@ AT_CHECK_UNQUOTED([ovn_trace --ct new --ct new --minimal ls "${flow}"], [0], [dn
  ct_next(ct_state=new|trk);
  ])
  
@@ -1495,7 +1941,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -8528,6 +8596,7 @@ AT_CHECK([as northd ovn-appctl -t ovn-northd parallel-build/set-n-threads 1 2],
+@@ -8528,6 +8600,7 @@ AT_CHECK([as northd ovn-appctl -t ovn-northd parallel-build/set-n-threads 1 2],
  ovn-appctl: ovn-northd: server returned an error
  ])
  
@@ -1503,7 +1949,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -8596,6 +8665,7 @@ check ovn-nbctl --wait=sb sync
+@@ -8596,6 +8669,7 @@ check ovn-nbctl --wait=sb sync
  ovn-sbctl dump-flows | DUMP_FLOWS_SORTED > flows3
  AT_CHECK([diff flows1 flows3])
  
@@ -1511,7 +1957,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -8803,6 +8873,7 @@ sort | sed 's/table=../table=??/' ], [0], [dnl
+@@ -8803,6 +8877,7 @@ sort | sed 's/table=../table=??/' ], [0], [dnl
    table=??(ls_out_check_port_sec), priority=100  , match=(eth.mcast), action=(reg0[[15]] = 0; next;)
  ])
  
@@ -1519,7 +1965,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -8996,6 +9067,7 @@ AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort
+@@ -8996,6 +9071,7 @@ AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort
    table=? (ls_in_put_fdb      ), priority=0    , match=(1), action=(next;)
  ])
  
@@ -1527,7 +1973,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9084,6 +9156,7 @@ AT_CHECK([grep "ls_in_lb " S1flows | sed 's/table=../table=??/' | sort], [0], [d
+@@ -9084,6 +9160,7 @@ AT_CHECK([grep "ls_in_lb " S1flows | sed 's/table=../table=??/' | sort], [0], [d
  
  check_column "" sb:load_balancer datapaths name=lb0
  
@@ -1535,7 +1981,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9119,6 +9192,7 @@ AT_CHECK([grep "lr_in_arp_resolve" R1flows | grep priority=90 | sort], [0], [dnl
+@@ -9119,6 +9196,7 @@ AT_CHECK([grep "lr_in_arp_resolve" R1flows | grep priority=90 | sort], [0], [dnl
    table=17(lr_in_arp_resolve  ), priority=90   , match=(outport == "R1-PUB" && ip6.src == 1000::3 && is_chassis_resident("S0-P0")), action=(get_nd(outport, xxreg0); next;)
  ])
  
@@ -1543,7 +1989,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9303,6 +9377,7 @@ AT_CHECK([grep "lr_in_dnat " R1flows_2lbs | sed 's/table=../table=??/' | sort],
+@@ -9303,6 +9381,7 @@ AT_CHECK([grep "lr_in_dnat " R1flows_2lbs | sed 's/table=../table=??/' | sort],
  ])
  
  
@@ -1551,7 +1997,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9407,6 +9482,7 @@ check ovn-nbctl --wait=sb sync
+@@ -9407,6 +9486,7 @@ check ovn-nbctl --wait=sb sync
  AT_CHECK([as northd ovn-appctl -t ovn-northd inc-engine/show-stats sync_to_sb_addr_set recompute], [0], [0
  ])
  
@@ -1559,7 +2005,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9769,6 +9845,7 @@ dnl Expect both ACLs on sw1 and no ACLs on sw2
+@@ -9769,6 +9849,7 @@ dnl Expect both ACLs on sw1 and no ACLs on sw2
  check_acl_lflows 1 1 0 0
  CHECK_NO_CHANGE_AFTER_RECOMPUTE
  
@@ -1567,7 +2013,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9887,6 +9964,7 @@ AT_CHECK([ovn-sbctl dump-flows | grep "ls_in_acl" | grep "match=(1)"  | sed 's/t
+@@ -9887,6 +9968,7 @@ AT_CHECK([ovn-sbctl dump-flows | grep "ls_in_acl" | grep "match=(1)"  | sed 's/t
    table=??(ls_in_acl_hint     ), priority=0    , match=(1), action=(next;)
  ])
  
@@ -1575,7 +2021,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -9922,6 +10000,7 @@ check ovn-nbctl destroy Chassis_Template_Var hv2
+@@ -9922,6 +10004,7 @@ check ovn-nbctl destroy Chassis_Template_Var hv2
  check ovn-nbctl --wait=sb sync
  check_row_count sb:Chassis_Template_Var 0
  
@@ -1583,7 +2029,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10086,6 +10165,7 @@ ct_lb_related:         true
+@@ -10086,6 +10169,7 @@ ct_lb_related:         true
  mac_binding_timestamp: true
  ])
  
@@ -1591,7 +2037,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10108,6 +10188,7 @@ AT_CHECK([fetch_column sb:Port_Binding options logical_port=public |grep -q 'qos
+@@ -10108,6 +10192,7 @@ AT_CHECK([fetch_column sb:Port_Binding options logical_port=public |grep -q 'qos
  check ovn-nbctl --wait=sb set Logical_Switch_Port public options:qos_min_rate=200000 options:network_name=phys
  AT_CHECK([fetch_column sb:Port_Binding options logical_port=public |grep -q 'qos_physical_network=phys'])
  
@@ -1599,7 +2045,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10143,6 +10224,7 @@ AT_CHECK([ovn-sbctl lflow-list ls | grep qos | sed 's/table=../table=??/'], [0],
+@@ -10143,6 +10228,7 @@ AT_CHECK([ovn-sbctl lflow-list ls | grep qos | sed 's/table=../table=??/'], [0],
    table=??(ls_out_qos_meter   ), priority=0    , match=(1), action=(next;)
  ])
  
@@ -1607,7 +2053,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10270,6 +10352,7 @@ acl_test from-lport "" pg ls_in_acl_eval ls_in_acl_action 8
+@@ -10270,6 +10356,7 @@ acl_test from-lport "" pg ls_in_acl_eval ls_in_acl_action 8
  acl_test from-lport "--apply-after-lb" pg ls_in_acl_after_lb_eval ls_in_acl_after_lb_action 18
  acl_test to-lport "" pg ls_out_acl_eval ls_out_acl_action 4
  
@@ -1615,7 +2061,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10316,6 +10399,7 @@ acl_test from-lport "" pg ls_in_acl_eval
+@@ -10316,6 +10403,7 @@ acl_test from-lport "" pg ls_in_acl_eval
  acl_test from-lport "--apply-after-lb" pg ls_in_acl_after_lb_eval
  acl_test to-lport "" pg ls_out_acl_eval
  
@@ -1623,7 +2069,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10375,6 +10459,7 @@ AT_CHECK([ovn-sbctl lflow-list sw | grep ls_out_pre_lb | grep priority=110 | gre
+@@ -10375,6 +10463,7 @@ AT_CHECK([ovn-sbctl lflow-list sw | grep ls_out_pre_lb | grep priority=110 | gre
    table=??(ls_out_pre_lb      ), priority=110  , match=(ip && outport == "sw-ln"), action=(ct_clear; next;)
  ])
  
@@ -1631,7 +2077,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10398,6 +10483,7 @@ check ovn-nbctl --wait=sb lsp-set-type p1 external
+@@ -10398,6 +10487,7 @@ check ovn-nbctl --wait=sb lsp-set-type p1 external
  sb_lb_recomp=$(as northd ovn-appctl -t ovn-northd inc-engine/show-stats sync_to_sb_lb recompute)
  AT_CHECK([test x$sb_lb_recomp != x0])
  
@@ -1639,7 +2085,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10553,6 +10639,7 @@ check ovn-nbctl --wait=hv lsp-del lsp0-1
+@@ -10553,6 +10643,7 @@ check ovn-nbctl --wait=hv lsp-del lsp0-1
  check_recompute_counter 0 0
  CHECK_NO_CHANGE_AFTER_RECOMPUTE
  
@@ -1647,7 +2093,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10756,6 +10843,7 @@ dnl Only triggers recompute of the sync_meters and lflow nodes.
+@@ -10756,6 +10847,7 @@ dnl Only triggers recompute of the sync_meters and lflow nodes.
  check_recompute_counter 0 2 2
  CHECK_NO_CHANGE_AFTER_RECOMPUTE(1)
  
@@ -1655,7 +2101,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10807,6 +10895,7 @@ AT_CHECK([grep "lr_in_gw_redirect" R1flows |sed s'/table=../table=??/' |sort], [
+@@ -10807,6 +10899,7 @@ AT_CHECK([grep "lr_in_gw_redirect" R1flows |sed s'/table=../table=??/' |sort], [
    table=??(lr_in_gw_redirect  ), priority=50   , match=(outport == "R1-PUB"), action=(outport = "cr-R1-PUB"; next;)
  ])
  
@@ -1663,7 +2109,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -10874,6 +10963,7 @@ check_column $remote_chassis_uuid Port_Binding chassis logical_port=sw0-r1
+@@ -10874,6 +10967,7 @@ check_column $remote_chassis_uuid Port_Binding chassis logical_port=sw0-r1
  check ovn-nbctl --wait=hv lsp-set-type sw0-r1 router
  check_column '' Port_Binding chassis logical_port=sw0-r1
  
@@ -1671,7 +2117,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -11516,6 +11606,7 @@ check ovn-nbctl --wait=sb lb-add lb4 10.0.0.40:4040 10.0.40.40:4050 \
+@@ -11516,6 +11610,7 @@ check ovn-nbctl --wait=sb lb-add lb4 10.0.0.40:4040 10.0.40.40:4050 \
  check_engine_stats northd recompute nocompute
  CHECK_NO_CHANGE_AFTER_RECOMPUTE
  
@@ -1679,7 +2125,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -11569,6 +11660,7 @@ AT_CHECK([as northd ovn-appctl -t ovn-northd status], [0], [dnl
+@@ -11569,6 +11664,7 @@ AT_CHECK([as northd ovn-appctl -t ovn-northd status], [0], [dnl
  Status: active
  ])
  
@@ -1687,7 +2133,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -11694,6 +11786,7 @@ AT_CHECK([ovn-sbctl dump-flows S1 | grep pre_acl | ovn_strip_lflows], [0], [dnl
+@@ -11694,6 +11790,7 @@ AT_CHECK([ovn-sbctl dump-flows S1 | grep pre_acl | ovn_strip_lflows], [0], [dnl
    table=??(ls_out_pre_acl     ), priority=110  , match=(nd || nd_rs || nd_ra || mldv1 || mldv2 || (udp && udp.src == 546 && udp.dst == 547)), action=(next;)
  ])
  
@@ -1695,7 +2141,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -11736,6 +11829,7 @@ check_engine_stats lflow recompute nocompute
+@@ -11736,6 +11833,7 @@ check_engine_stats lflow recompute nocompute
  check_engine_stats sync_to_sb_lb recompute compute
  CHECK_NO_CHANGE_AFTER_RECOMPUTE
  
@@ -1703,7 +2149,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -11957,6 +12051,7 @@ AT_CHECK([echo $dpgrp_dps | grep $sw3_uuid], [0], [ignore])
+@@ -11957,6 +12055,7 @@ AT_CHECK([echo $dpgrp_dps | grep $sw3_uuid], [0], [ignore])
  AT_CHECK([echo $dpgrp_dps | grep $sw4_uuid], [0], [ignore])
  AT_CHECK([echo $dpgrp_dps | grep $sw5_uuid], [0], [ignore])
  
@@ -1711,7 +2157,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -12245,6 +12340,7 @@ ovn-nbctl: constraint violation: -2 is not in the valid range 0 to 4294967295 (i
+@@ -12245,6 +12344,7 @@ ovn-nbctl: constraint violation: -2 is not in the valid range 0 to 4294967295 (i
  ])
  check_row_count nb:QoS 0
  
@@ -1719,7 +2165,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -12417,6 +12513,7 @@ check_engine_stats fdb_aging recompute nocompute
+@@ -12417,6 +12517,7 @@ check_engine_stats fdb_aging recompute nocompute
  check_engine_stats northd recompute nocompute
  check_engine_stats lflow recompute nocompute
  
@@ -1727,7 +2173,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  
  AT_SETUP([RBAC -- Recover builtin role and permissions])
-@@ -12544,6 +12641,7 @@ check_row_count Port_Binding 1 logical_port=lrp0 options:peer{not-in}lrp1
+@@ -12544,6 +12645,7 @@ check_row_count Port_Binding 1 logical_port=lrp0 options:peer{not-in}lrp1
  check_row_count Port_Binding 1 logical_port=lrp1 options:peer{not-in}lrp2
  check_row_count Port_Binding 1 logical_port=lrp2 options:peer{not-in}lrp0
  
@@ -1735,7 +2181,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -12563,6 +12661,7 @@ check ovn-nbctl --wait=sb sync \
+@@ -12563,6 +12665,7 @@ check ovn-nbctl --wait=sb sync \
  
  check grep -q "Bad configuration: The peer of the switch port 'ls-lrp1' (LRP peer: 'lrp1') has its own peer configuration: 'lrp0'" northd/ovn-northd.log
  
@@ -1743,7 +2189,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -12676,6 +12775,7 @@ AT_CHECK([grep -E flags.network_id lrflows | sed 's/table=../table=??/' | sort],
+@@ -12676,6 +12779,7 @@ AT_CHECK([grep -E flags.network_id lrflows | sed 's/table=../table=??/' | sort],
    table=??(lr_out_snat        ), priority=110  , match=(flags.force_snat_for_lb == 1 && flags.network_id == 9 && ip4 && outport == "lrp-server"), action=(ct_snat(6.5.1.1);)
    table=??(lr_out_snat        ), priority=110  , match=(flags.force_snat_for_lb == 1 && flags.network_id == 9 && ip6 && outport == "lrp-server"), action=(ct_snat(ff01::b);)
  ])
@@ -1751,7 +2197,49 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -13167,6 +13267,7 @@ AT_CHECK([grep -Fe "172.168.0.110" -e "172.168.0.120" -e "10.0.0.3" -e "20.0.0.3
+@@ -12740,10 +12844,16 @@ AT_CHECK([grep "lr_in_ip_input" lr0flows | ovn_strip_lflows], [0], [dnl
+   table=??(lr_in_ip_input     ), priority=100  , match=(ip4.src == {20.0.0.1, 20.0.0.255} && reg9[[0]] == 0), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=100  , match=(ip4.src_mcast ||ip4.src == 255.255.255.255 || ip4.src == 127.0.0.0/8 || ip4.dst == 127.0.0.0/8 || ip4.src == 0.0.0.0/8 || ip4.dst == 0.0.0.0/8), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=120  , match=(inport == "lr0-public" && ip4.src == 172.168.0.100), action=(next;)
+-  table=??(lr_in_ip_input     ), priority=30   , match=(ip.ttl == {0, 1}), action=(drop;)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-public" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst <-> ip4.src ; ip.ttl = 254; outport = "lr0-public"; flags.loopback = 1; output; };)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw0" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.0.0.1 ; ip.ttl = 254; outport = "lr0-sw0"; flags.loopback = 1; output; };)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw1" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.0.0.1 ; ip.ttl = 254; outport = "lr0-sw1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=29   , match=(ip.ttl == {0, 1}), action=(drop;)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-public" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 172.168.0.10; ip.ttl = 254; outport = "lr0-public"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-public" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = fe80::200:ff:fe00:ff02; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lr0-public"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw0" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.0.0.1; ip.ttl = 254; outport = "lr0-sw0"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw0" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = fe80::200:ff:fe00:ff01; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lr0-sw0"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw1" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.0.0.1; ip.ttl = 254; outport = "lr0-sw1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw1" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = fe80::200:ff:fe00:ff03; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lr0-sw1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-public" && ip4 && ip4.src == 172.168.0.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst <-> ip4.src ; ip.ttl = 254; outport = "lr0-public"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw0" && ip4 && ip4.src == 10.0.0.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.0.0.1 ; ip.ttl = 254; outport = "lr0-sw0"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw1" && ip4 && ip4.src == 20.0.0.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.0.0.1 ; ip.ttl = 254; outport = "lr0-sw1"; flags.loopback = 1; output; };)
+   table=??(lr_in_ip_input     ), priority=32   , match=(ip.ttl == {0, 1} && !ip.later_frag && (ip4.mcast || ip6.mcast)), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=50   , match=(eth.bcast), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=60   , match=(ip4.dst == {10.0.0.1}), action=(drop;)
+@@ -12916,10 +13026,16 @@ AT_CHECK([grep "lr_in_ip_input" lr0flows | ovn_strip_lflows], [0], [dnl
+   table=??(lr_in_ip_input     ), priority=100  , match=(ip4.src == {20.0.0.1, 20.0.0.255} && reg9[[0]] == 0), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=100  , match=(ip4.src_mcast ||ip4.src == 255.255.255.255 || ip4.src == 127.0.0.0/8 || ip4.dst == 127.0.0.0/8 || ip4.src == 0.0.0.0/8 || ip4.dst == 0.0.0.0/8), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=120  , match=(inport == "lr0-public" && ip4.src == 172.168.0.100), action=(next;)
+-  table=??(lr_in_ip_input     ), priority=30   , match=(ip.ttl == {0, 1}), action=(drop;)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-public" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst <-> ip4.src ; ip.ttl = 254; outport = "lr0-public"; flags.loopback = 1; output; };)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw0" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.0.0.1 ; ip.ttl = 254; outport = "lr0-sw0"; flags.loopback = 1; output; };)
+-  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw1" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.0.0.1 ; ip.ttl = 254; outport = "lr0-sw1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=29   , match=(ip.ttl == {0, 1}), action=(drop;)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-public" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 172.168.0.10; ip.ttl = 254; outport = "lr0-public"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-public" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = fe80::200:ff:fe00:ff02; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lr0-public"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw0" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.0.0.1; ip.ttl = 254; outport = "lr0-sw0"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw0" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = fe80::200:ff:fe00:ff01; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lr0-sw0"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw1" && ip4 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.0.0.1; ip.ttl = 254; outport = "lr0-sw1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=30   , match=(inport == "lr0-sw1" && ip6 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp6 {eth.dst <-> eth.src; ip6.dst = ip6.src; ip6.src = fe80::200:ff:fe00:ff03; ip.ttl = 254; icmp6.type = 3; /* Time exceeded */ icmp6.code = 0; /* TTL exceeded in transit */ outport = "lr0-sw1"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-public" && ip4 && ip4.src == 172.168.0.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst <-> ip4.src ; ip.ttl = 254; outport = "lr0-public"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw0" && ip4 && ip4.src == 10.0.0.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 10.0.0.1 ; ip.ttl = 254; outport = "lr0-sw0"; flags.loopback = 1; output; };)
++  table=??(lr_in_ip_input     ), priority=31   , match=(inport == "lr0-sw1" && ip4 && ip4.src == 20.0.0.0/24 && ip.ttl == {0, 1} && !ip.later_frag), action=(icmp4 {eth.dst <-> eth.src; icmp4.type = 11; /* Time exceeded */ icmp4.code = 0; /* TTL exceeded in transit */ ip4.dst = ip4.src; ip4.src = 20.0.0.1 ; ip.ttl = 254; outport = "lr0-sw1"; flags.loopback = 1; output; };)
+   table=??(lr_in_ip_input     ), priority=32   , match=(ip.ttl == {0, 1} && !ip.later_frag && (ip4.mcast || ip6.mcast)), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=50   , match=(eth.bcast), action=(drop;)
+   table=??(lr_in_ip_input     ), priority=60   , match=(ip4.dst == {10.0.0.1}), action=(drop;)
+@@ -13167,6 +13283,7 @@ AT_CHECK([grep -Fe "172.168.0.110" -e "172.168.0.120" -e "10.0.0.3" -e "20.0.0.3
    table=??(ls_in_l2_lkup      ), priority=80   , match=(flags[[1]] == 0 && arp.op == 1 && arp.tpa == 172.168.0.120), action=(clone {outport = "public-lr0"; output; }; outport = "_MC_flood_l2"; output;)
  ])
  
@@ -1759,7 +2247,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
  
-@@ -13243,5 +13344,6 @@ AT_CHECK([ovn-sbctl lflow-list ls1 | grep ls_in_arp_rsp | grep "eth.dst == 00:00
+@@ -13243,5 +13360,6 @@ AT_CHECK([ovn-sbctl lflow-list ls1 | grep ls_in_arp_rsp | grep "eth.dst == 00:00
  AT_CHECK([ovn-sbctl lflow-list ls1 | grep ls_in_arp_rsp | grep "ip6.dst == fd01::1" | ovn_strip_lflows], [0], [dnl
  ])
  
@@ -1767,7 +2255,7 @@ index a29bf0b58..4a4f962a8 100644
  AT_CLEANUP
  ])
 diff --git a/tests/ovn.at b/tests/ovn.at
-index 7e76fea0d..bfc3f0343 100644
+index 7e76fea0d..48f90174a 100644
 --- a/tests/ovn.at
 +++ b/tests/ovn.at
 @@ -2467,6 +2467,7 @@ OVS_WAIT_UNTIL([test x`ovs-vsctl get Open_vSwitch . other_config:vlan-limit | tr
@@ -1894,7 +2382,106 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -20978,6 +20979,7 @@ AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 192.168.0.2"])
+@@ -19630,7 +19631,7 @@ AT_SETUP([TTL exceeded])
+ AT_KEYWORDS([ttl-exceeded])
+ ovn_start
+ 
+-# test_ip_packet INPORT HV ETH_SRC ETH_DST IPV4_SRC IPV4_DST IPV4_ROUTER IP_CHKSUM EXP_IP_CHKSUM EXP_ICMP_CHKSUM SHOULD_REPLY
++# test_ip_packet INPORT HV ETH_SRC ETH_DST IPV4_SRC IPV4_DST IP_SRC_REPLY IP_CHKSUM EXP_IP_CHKSUM EXP_ICMP_CHKSUM SHOULD_REPLY
+ #
+ # Causes a packet to be received on INPORT of the hypervisor HV. The packet is an IPv4 packet with
+ # ETH_SRC, ETH_DST, IPV4_SRC, IPV4_DST, IP_CHKSUM as specified and TTL set to 1.
+@@ -19640,10 +19641,10 @@ ovn_start
+ # INPORT is a lport number, e.g. 11 for vif11.
+ # HV is a hypervisor number
+ # ETH_SRC and ETH_DST are each 12 hex digits.
+-# IPV4_SRC, IPV4_DST and IPV4_ROUTER are each 8 hex digits.
++# IPV4_SRC, IPV4_DST and IP_SRC_REPLY are each 8 hex digits.
+ # IP_CHKSUM, EXP_IP_CHSUM and EXP_ICMP_CHKSUM are each 4 hex digits
+ test_ip_packet() {
+-    local inport=$1 hv=$2 eth_src=$3 eth_dst=$4 ipv4_src=$5 ipv4_dst=$6 ip_router=$7 ip_chksum=$8
++    local inport=$1 hv=$2 eth_src=$3 eth_dst=$4 ipv4_src=$5 ipv4_dst=$6 ip_src_reply=$7 ip_chksum=$8
+     local exp_ip_chksum=$9 exp_icmp_chksum=${10}
+     shift 10
+     local should_reply=$1
+@@ -19656,28 +19657,28 @@ test_ip_packet() {
+     local icmp_data=00000000
+     local reply_icmp_payload=${icmp_type_code_response}${exp_icmp_chksum}${icmp_data}
+     if test $should_reply == yes; then
+-        local reply=${eth_src}${eth_dst}08004500003000004000${reply_icmp_ttl}01${exp_ip_chksum}${ip_router}${ipv4_src}${reply_icmp_payload}
++        local reply=${eth_src}${eth_dst}08004500003000004000${reply_icmp_ttl}01${exp_ip_chksum}${ip_src_reply}${ipv4_src}${reply_icmp_payload}
+         echo $reply$orig_pkt_in_reply >> vif$inport.expected
+     fi
+ 
+     as hv$hv ovs-appctl netdev-dummy/receive vif$inport $packet
+ }
+ 
+-# test_ip6_packet INPORT HV ETH_SRC ETH_DST IPV6_SRC IPV6_DST IPV6_ROUTER EXP_ICMP_CHKSUM SHOULD_REPLY
++# test_ip6_packet INPORT HV ETH_SRC ETH_DST IPV6_SRC IPV6_DST IPV6_SRC_REPLY EXP_ICMP_CHKSUM SHOULD_REPLY
+ #
+ # Causes a packet to be received on INPORT of the hypervisor HV. The packet is an IPv6
+ # packet with ETH_SRC, ETH_DST, IPV6_SRC and IPV6_DST as specified.
+ # IPV6_ROUTER and EXP_ICMP_CHKSUM are the source IP and checksum of the icmpv6 ttl exceeded
+ # packet sent by OVN logical router
+ test_ip6_packet() {
+-    local inport=$1 hv=$2 eth_src=$3 eth_dst=$4 ipv6_src=$5 ipv6_dst=$6 ipv6_router=$7 exp_icmp_chksum=$8 should_reply=$9
++    local inport=$1 hv=$2 eth_src=$3 eth_dst=$4 ipv6_src=$5 ipv6_dst=$6 ipv6_src_reply=$7 exp_icmp_chksum=$8 should_reply=$9
+     shift 8
+ 
+     local ip6_hdr=6000000000151101${ipv6_src}${ipv6_dst}
+     local packet=${eth_dst}${eth_src}86dd${ip6_hdr}dbb8303900155bac6b646f65206676676e6d66720a
+ 
+     if test $should_reply == yes; then
+-        local reply=${eth_src}${eth_dst}86dd6000000000453afe${ipv6_router}${ipv6_src}0300${exp_icmp_chksum}00000000${ip6_hdr}dbb8303900155bac6b646f65206676676e6d66720a
++        local reply=${eth_src}${eth_dst}86dd6000000000453afe${ipv6_src_reply}${ipv6_src}0300${exp_icmp_chksum}00000000${ip6_hdr}dbb8303900155bac6b646f65206676676e6d66720a
+         echo $reply >> vif$inport.expected
+     fi
+ 
+@@ -19708,10 +19709,8 @@ done
+ 
+ check ovn-nbctl lr-add lr0
+ for i in 1 2; do
+-    check ovn-nbctl lrp-add lr0 lrp$i 00:00:00:00:ff:0$i 192.168.$i.254/24 2001:db8:$i::1/64
+-    check ovn-nbctl -- lsp-add sw$i lrp$i-attachment \
+-              -- set Logical_Switch_Port lrp$i-attachment type=router \
+-                options:router-port=lrp$i addresses='"00:00:00:00:ff:0'$i' 192.168.'$i'.254 2001:db8:'$i'::1"'
++    check ovn-nbctl lrp-add lr0 lrp$i 00:00:00:00:ff:0$i 172.31.$i.254/24 192.168.$i.254/24 2001:db8:$i::1/64 2002:db8:$i::1/64
++    check ovn-nbctl lsp-add-router-port sw$i lrp$i-attachment lrp$i
+ done
+ 
+ OVN_POPULATE_ARP
+@@ -19719,20 +19718,28 @@ OVN_POPULATE_ARP
+ wait_for_ports_up
+ check ovn-nbctl --wait=hv sync
+ 
++# Test packet with source IP from router's networks
+ test_ip_packet 1 1 000000000001 00000000ff01 $(ip_to_hex 192 168 1 1) $(ip_to_hex 192 168 2 1) $(ip_to_hex 192 168 1 254) 0000 f87c ea96 yes
+ test_ip6_packet 1 1 000000000001 00000000ff01 20010db8000100000000000000000011 20010db8000200000000000000000011 20010db8000100000000000000000001 1c22 yes
+ 
++test_ip_packet 1 1 000000000001 00000000ff01 $(ip_to_hex 172 31 1 5) $(ip_to_hex 192 168 2 1) $(ip_to_hex 172 31 1 254) 0000 218b ff1b yes
++test_ip6_packet 1 1 000000000001 00000000ff01 20020db8000100000000000000000011 20010db8000200000000000000000011 20020db8000100000000000000000001 1c1f yes
++
++# Test packet with source IP from external network - expect reply from first router's IP
++test_ip_packet 1 1 000000000001 00000000ff01 $(ip_to_hex 1 1 1 1) $(ip_to_hex 192 168 2 1) $(ip_to_hex 172 31 1 254) 0000 ccad aa3e yes
++test_ip6_packet 1 1 000000000001 00000000ff01 20030db8000100000000000000000011 20010db8000200000000000000000011 20010db8000100000000000000000001 1c1e yes
++
+ # Should not send ICMP for multicast
+ test_ip_packet 1 1 000000000001 01005e7f0001 $(ip_to_hex 192 168 1 1) $(ip_to_hex 239 255 0 1) $(ip_to_hex 192 168 1 254) 0000 000000000 no
+ test_ip6_packet 1 1 000000000001 333300000001 20010db8000100000000000000000011 ff020000000000000000000000000001 20010db8000100000000000000000001 0000 no
+ 
+ OVN_CHECK_PACKETS([hv1/vif1-tx.pcap], [vif1.expected])
+ 
+-# Confirm from debug log that we only see 2 packet-ins (no packet-ins for
++# Confirm from debug log that we only see 6 packet-ins (no packet-ins for
+ # multicasts). This is necessary because not seeing ICMP messages doesn't
+ # necessarily mean the packet-in didn't happen. It is possible that packet-in
+ # is processed but the ICMP message got dropped.
+-AT_CHECK([grep -c packet-in hv1/ovn-controller.log], [0], [2
++AT_CHECK([grep -c packet-in hv1/ovn-controller.log], [0], [6
+ ])
+ 
+ OVN_CLEANUP([hv1], [hv2])
+@@ -20978,6 +20985,7 @@ AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 192.168.0.2"])
  AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 192.168.0.3"])
  AT_CHECK([ovn-nbctl lsp-set-addresses sw2-p1 "00:00:00:00:00:04 aef0::1"])
  
@@ -1902,7 +2489,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -21397,6 +21399,7 @@ AT_CLEANUP
+@@ -21397,6 +21405,7 @@ AT_CLEANUP
  OVN_FOR_EACH_NORTHD([
  AT_SETUP([IP packet buffering])
  AT_KEYWORDS([ip-buffering])
@@ -1910,7 +2497,7 @@ index 7e76fea0d..bfc3f0343 100644
  ovn_start
  
  # Logical network:
-@@ -21729,6 +21732,8 @@ ovn-nbctl get Logical-Switch-Port p0 dynamic_addresses
+@@ -21729,6 +21738,8 @@ ovn-nbctl get Logical-Switch-Port p0 dynamic_addresses
  
  AT_CHECK([ovn-nbctl get Logical-Switch-Port p0 dynamic_addresses], [0], [[[]]
  ])
@@ -1919,7 +2506,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -21752,6 +21757,7 @@ done
+@@ -21752,6 +21763,7 @@ done
  ovn-nbctl list logical_switch_port
  ovn-nbctl list logical_router_port
  
@@ -1927,7 +2514,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -22701,6 +22707,7 @@ AT_CHECK([ovn-nbctl ls-add sw1], [1], [ignore],
+@@ -22701,6 +22713,7 @@ AT_CHECK([ovn-nbctl ls-add sw1], [1], [ignore],
  [ovn-nbctl: transaction error: {"details":"insert operation not allowed when database server is in read only mode","error":"not allowed"}
  ])
  
@@ -1935,7 +2522,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -24327,6 +24334,7 @@ on_exit 'kill $(cat ovn-nbctl.pid)'
+@@ -24327,6 +24340,7 @@ on_exit 'kill $(cat ovn-nbctl.pid)'
  # but we can still ensure that the command is successful.
  AT_CHECK([ovn-nbctl -u $sockfile show])
  
@@ -1943,7 +2530,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -28062,6 +28070,8 @@ check ovn-nbctl lr-add r1
+@@ -28062,6 +28076,8 @@ check ovn-nbctl lr-add r1
  check ovn-nbctl lrp-add r1 rp1 CC:DD:EE:EE:DD:CC AEF0::1/64 BEF0::1/64
  
  AT_CHECK([ovn-nbctl --may-exist lrp-add r1 rp1 cc:dd:ee:ee:dd:cc bef0:0000:0000:0000::1/64 aef0::1/64])
@@ -1952,7 +2539,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -28075,6 +28085,8 @@ check ovn-nbctl lr-nat-add r1 dnat AEF0::1 BEEF::1
+@@ -28075,6 +28091,8 @@ check ovn-nbctl lr-nat-add r1 dnat AEF0::1 BEEF::1
  
  AT_CHECK([ovn-nbctl --may-exist lr-nat-add r1 snat aef0:0000::1 beef:0000::/ffff:ffff:ffff:ffff::0])
  AT_CHECK([ovn-nbctl --may-exist lr-nat-add r1 dnat aef0:0000:00::1 beef::0001])
@@ -1961,7 +2548,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -28088,6 +28100,8 @@ check ovn-nbctl lr-nat-add r1 dnat AEF0::1 BEEF::1
+@@ -28088,6 +28106,8 @@ check ovn-nbctl lr-nat-add r1 dnat AEF0::1 BEEF::1
  
  AT_CHECK([ovn-nbctl --if-exists lr-nat-del r1 snat beef:0000::0/ffff:ffff:ffff:ffff::0])
  AT_CHECK([ovn-nbctl --if-exists lr-nat-del r1 dnat aef0:0000:00::1])
@@ -1970,7 +2557,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -30932,14 +30946,9 @@ AT_CHECK_UNQUOTED([grep -c "in_port=2" offlows_table0.txt], [1], [dnl
+@@ -30932,14 +30952,9 @@ AT_CHECK_UNQUOTED([grep -c "in_port=2" offlows_table0.txt], [1], [dnl
  0
  ])
  
@@ -1988,7 +2575,50 @@ index 7e76fea0d..bfc3f0343 100644
  
  AT_CLEANUP
  ])
-@@ -38822,6 +38831,7 @@ dnl Make sure that the packet was received by vm0.
+@@ -34008,7 +34023,7 @@ echo " table=73, priority=80,reg14=0x$sw0p1_key,metadata=0x$sw0_dp_key actions=l
+ check_port_sec_offlows hv1 73
+ 
+ echo " table=74, priority=80,arp,reg14=0x$sw0p1_key,metadata=0x1 actions=load:0x1->NXM_NX_REG10[[12]]
+- table=74, priority=80,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=135 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=80,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=135 actions=load:0x1->NXM_NX_REG10[[12]]
+  table=74, priority=80,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=136 actions=load:0x1->NXM_NX_REG10[[12]]
+  table=74, priority=90,arp,reg14=0x$sw0p1_key,metadata=0x1,dl_src=00:00:00:00:00:03,arp_sha=00:00:00:00:00:03 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=135,icmp_code=0,nd_sll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
+@@ -34044,7 +34059,7 @@ echo " table=73, priority=80,reg14=0x$sw0p1_key,metadata=0x1 actions=load:0x1->N
+ check_port_sec_offlows hv1 73
+ 
+ echo " table=74, priority=80,arp,reg14=0x$sw0p1_key,metadata=0x1 actions=load:0x1->NXM_NX_REG10[[12]]
+- table=74, priority=80,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=135 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=80,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=135 actions=load:0x1->NXM_NX_REG10[[12]]
+  table=74, priority=80,icmp6,reg14=0x$sw0p1_key,metadata=0x1,nw_ttl=255,icmp_type=136 actions=load:0x1->NXM_NX_REG10[[12]]
+  table=74, priority=90,arp,reg14=0x$sw0p1_key,metadata=0x1,dl_src=00:00:00:00:00:03,arp_spa=10.0.0.3,arp_sha=00:00:00:00:00:03 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,arp,reg14=0x$sw0p1_key,metadata=0x1,dl_src=00:00:00:00:00:13,arp_spa=10.0.0.13,arp_sha=00:00:00:00:00:13 actions=load:0->NXM_NX_REG10[[12]]
+@@ -34121,17 +34136,17 @@ echo " table=73, priority=80,reg14=0x$sw0p2_key,metadata=0x1 actions=load:0x1->N
+ check_port_sec_offlows hv2 73
+ 
+ echo " table=74, priority=80,arp,reg14=0x$sw0p2_key,metadata=0x1 actions=load:0x1->NXM_NX_REG10[[12]]
+- table=74, priority=80,icmp6,reg14=0x$sw0p2_key,metadata=0x1,nw_ttl=255,icmp_type=135 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=80,icmp6,reg14=0x$sw0p2_key,metadata=0x1,nw_ttl=255,icmp_type=135 actions=load:0x1->NXM_NX_REG10[[12]]
+  table=74, priority=80,icmp6,reg14=0x$sw0p2_key,metadata=0x1,nw_ttl=255,icmp_type=136 actions=load:0x1->NXM_NX_REG10[[12]]
+  table=74, priority=90,arp,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,arp_spa=10.0.0.4,arp_sha=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,arp,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,arp_spa=20.0.0.4,arp_sha=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,arp,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,arp_spa=30.0.0.0/16,arp_sha=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
+- table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,icmp_type=136,icmp_code=0,nd_target=1000::4,nd_tll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
+- table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,icmp_type=136,icmp_code=0,nd_target=1000::4,nd_tll=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
+- table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,icmp_type=136,icmp_code=0,nd_target=2000::/64,nd_tll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
+- table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,icmp_type=136,icmp_code=0,nd_target=2000::/64,nd_tll=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
+- table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:13,icmp_type=136,icmp_code=0,nd_target=aef0::4,nd_tll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
+- table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:13,icmp_type=136,icmp_code=0,nd_target=aef0::4,nd_tll=00:00:00:00:00:13 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,nw_ttl=255,icmp_type=136,icmp_code=0,nd_target=1000::4,nd_tll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,nw_ttl=255,icmp_type=136,icmp_code=0,nd_target=1000::4,nd_tll=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,nw_ttl=255,icmp_type=136,icmp_code=0,nd_target=2000::/64,nd_tll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:04,nw_ttl=255,icmp_type=136,icmp_code=0,nd_target=2000::/64,nd_tll=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:13,nw_ttl=255,icmp_type=136,icmp_code=0,nd_target=aef0::4,nd_tll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
++ table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,dl_src=00:00:00:00:00:13,nw_ttl=255,icmp_type=136,icmp_code=0,nd_target=aef0::4,nd_tll=00:00:00:00:00:13 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,nw_ttl=255,icmp_type=135,icmp_code=0,nd_sll=00:00:00:00:00:00 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,nw_ttl=255,icmp_type=135,icmp_code=0,nd_sll=00:00:00:00:00:04 actions=load:0->NXM_NX_REG10[[12]]
+  table=74, priority=90,icmp6,reg14=0x$sw0p2_key,metadata=0x1,nw_ttl=255,icmp_type=135,icmp_code=0,nd_sll=00:00:00:00:00:13 actions=load:0->NXM_NX_REG10[[12]]
+@@ -38822,6 +38837,7 @@ dnl Make sure that the packet was received by vm0.
  echo $packet >> expected-vif1
  OVN_CHECK_PACKETS([hv/vif1-tx.pcap], [expected-vif1])
  
@@ -1996,7 +2626,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -38965,6 +38975,7 @@ packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:fe', src='fa:16:3e:00:00:02')/ \
+@@ -38965,6 +38981,7 @@ packet=$(fmt_pkt "Ether(dst='f0:00:0f:01:02:fe', src='fa:16:3e:00:00:02')/ \
  echo $packet >> expected-ext
  OVN_CHECK_PACKETS([hv/br-phys_n1-tx.pcap], [expected-ext])
  
@@ -2004,7 +2634,7 @@ index 7e76fea0d..bfc3f0343 100644
  AT_CLEANUP
  ])
  
-@@ -39385,6 +39396,8 @@ expected=$(fmt_pkt "Ether(dst='${rx_dst_mac}', src='${rx_src_mac}')/ \
+@@ -39385,6 +39402,8 @@ expected=$(fmt_pkt "Ether(dst='${rx_dst_mac}', src='${rx_src_mac}')/ \
  
  echo $expected > expected
  OVN_CHECK_PACKETS([hv1/server-tx.pcap], [expected])
@@ -2202,7 +2832,7 @@ index 334c41588..f9d5cb6cb 100644
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
 diff --git a/tests/system-ovn.at b/tests/system-ovn.at
-index 202f890b7..85b14f5a8 100644
+index 202f890b7..b0a90e08b 100644
 --- a/tests/system-ovn.at
 +++ b/tests/system-ovn.at
 @@ -164,14 +164,7 @@ icmp,orig=(src=192.168.2.2,dst=192.168.1.2,id=<cleared>,type=8,code=0),reply=(sr
@@ -2631,14 +3261,14 @@ index 202f890b7..85b14f5a8 100644
  ])
  
 -OVS_APP_EXIT_AND_WAIT([ovn-controller])
--
--as ovn-sb
--OVS_APP_EXIT_AND_WAIT([ovsdb-server])
 +# Check that we do not get too many immediate wake up.
 +# Tolerate a few for any race conditions.
 +AT_CHECK([test 5 -gt `cat ovn-controller.log | \
 +grep -c "wakeup due to 0-ms timeout at controller/pinctrl.c:"`])
  
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
 -as ovn-nb
 -OVS_APP_EXIT_AND_WAIT([ovsdb-server])
 +OVS_APP_EXIT_AND_WAIT([ovn-controller])
@@ -3181,7 +3811,175 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8491,14 +8143,7 @@ check $PYTHON $srcdir/check_acl_log.py \
+@@ -8221,6 +7873,7 @@ check_acl_log_count 2
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8233,6 +7886,7 @@ check $PYTHON $srcdir/check_acl_log.py \
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=2 \
+     --name=allow_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:02 \
+@@ -8257,6 +7911,7 @@ check_acl_log_count 1
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8280,6 +7935,7 @@ check_acl_log_count 1
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8302,6 +7958,7 @@ check_acl_log_count 1
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8319,11 +7976,13 @@ clear_log
+ test_ping
+ 
+ # Now we should have the request and reply logged.
++# Note that reply traffic is now logged as to-lport.
+ check_acl_log_count 2
+ 
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8336,6 +7995,7 @@ check $PYTHON $srcdir/check_acl_log.py \
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=2 \
+     --name=allow_related_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:02 \
+@@ -8345,7 +8005,6 @@ check $PYTHON $srcdir/check_acl_log.py \
+     --icmp_type=0 \
+     --icmp_code=0
+ 
+-
+ # And now, let's start from scratch but make sure everything works when
+ # using egress ACLs.
+ check ovn-nbctl acl-del pg1
+@@ -8364,6 +8023,7 @@ check_acl_log_count 2
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8376,6 +8036,7 @@ check $PYTHON $srcdir/check_acl_log.py \
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=2 \
+     --name=allow_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:02 \
+@@ -8400,6 +8061,7 @@ check_acl_log_count 1
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8423,6 +8085,7 @@ check_acl_log_count 1
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8445,6 +8108,7 @@ check_acl_log_count 1
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+     --dl_src=00:00:00:00:00:01 \
+@@ -8462,43 +8126,38 @@ clear_log
+ test_ping
+ 
+ # Now we should have the request and reply logged.
++# Note that reply traffic is from-lport, so it is sorted first.
+ check_acl_log_count 2
+ 
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=1 \
+     --name=allow_related_acl \
++    --direction=from-lport \
+     --verdict=allow \
+     --protocol=icmp \
+-    --dl_src=00:00:00:00:00:01 \
+-    --dl_dst=00:00:00:00:00:02 \
+-    --nw_src=10.0.0.1 \
+-    --nw_dst=10.0.0.2 \
+-    --icmp_type=8 \
++    --dl_src=00:00:00:00:00:02 \
++    --dl_dst=00:00:00:00:00:01 \
++    --nw_src=10.0.0.2 \
++    --nw_dst=10.0.0.1 \
++    --icmp_type=0 \
+     --icmp_code=0
+ 
+ check $PYTHON $srcdir/check_acl_log.py \
+     --entry-num=2 \
+     --name=allow_related_acl \
++    --direction=to-lport \
+     --verdict=allow \
+     --protocol=icmp \
+-    --dl_src=00:00:00:00:00:02 \
+-    --dl_dst=00:00:00:00:00:01 \
+-    --nw_src=10.0.0.2 \
+-    --nw_dst=10.0.0.1 \
+-    --icmp_type=0 \
++    --dl_src=00:00:00:00:00:01 \
++    --dl_dst=00:00:00:00:00:02 \
++    --nw_src=10.0.0.1 \
++    --nw_dst=10.0.0.2 \
++    --icmp_type=8 \
+     --icmp_code=0
+ 
+-
+ OVS_APP_EXIT_AND_WAIT([ovn-controller])
+ 
+-as ovn-sb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
+-as ovn-nb
+-OVS_APP_EXIT_AND_WAIT([ovsdb-server])
+-
+-as northd
+-OVS_APP_EXIT_AND_WAIT([ovn-northd])
++OVN_CLEANUP_NORTHD
+ 
+ as
+ OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
+@@ -8620,14 +8279,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3197,7 +3995,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8620,14 +8265,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
+@@ -8682,14 +8334,7 @@ NS_CHECK_EXEC([sw0-p1.2], [ping -q -c 3 -i 0.3 -w 2 10.0.0.3 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3213,7 +4011,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8682,14 +8320,7 @@ NS_CHECK_EXEC([sw0-p1.2], [ping -q -c 3 -i 0.3 -w 2 10.0.0.3 | FORMAT_PING], \
+@@ -8771,14 +8416,7 @@ NS_CHECK_EXEC([ls1p1], [ping6 -q -c 3 -i 0.3 -w 2 1711::1  | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3229,7 +4027,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8771,14 +8402,7 @@ NS_CHECK_EXEC([ls1p1], [ping6 -q -c 3 -i 0.3 -w 2 1711::1  | FORMAT_PING], \
+@@ -8880,14 +8518,7 @@ AT_CHECK([grep -qE 'Too many active mcast flows' northd/ovn-northd.log], [1])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3245,7 +4043,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8880,14 +8504,7 @@ AT_CHECK([grep -qE 'Too many active mcast flows' northd/ovn-northd.log], [1])
+@@ -8949,14 +8580,7 @@ NS_CHECK_EXEC([vif0], [ping -q -c 3 -i 0.3 -w 1 192.168.20.1 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3261,7 +4059,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -8949,14 +8566,7 @@ NS_CHECK_EXEC([vif0], [ping -q -c 3 -i 0.3 -w 1 192.168.20.1 | FORMAT_PING], \
+@@ -9151,14 +8775,7 @@ udp,orig=(src=192.168.10.10,dst=192.168.20.20,sport=<cleared>,dport=<cleared>),r
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3277,7 +4075,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9151,14 +8761,7 @@ udp,orig=(src=192.168.10.10,dst=192.168.20.20,sport=<cleared>,dport=<cleared>),r
+@@ -9295,14 +8912,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3293,7 +4091,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9295,14 +8898,7 @@ OVS_WAIT_UNTIL([
+@@ -9440,14 +9050,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3309,7 +4107,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9440,14 +9036,7 @@ OVS_WAIT_UNTIL([
+@@ -9565,14 +9168,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3325,7 +4123,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9565,14 +9154,7 @@ OVS_WAIT_UNTIL([
+@@ -9716,14 +9312,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3341,7 +4139,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9716,14 +9298,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
+@@ -9861,14 +9450,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3357,7 +4155,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9861,14 +9436,7 @@ AT_CHECK([ovs-appctl dpctl/flush-conntrack])
+@@ -9957,14 +9539,7 @@ NS_CHECK_EXEC([ns_ls1p1], [ping -q -c 3 -i 0.3 -w 2 10.89.189.1 | FORMAT_PING],
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3373,7 +4171,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -9957,14 +9525,7 @@ NS_CHECK_EXEC([ns_ls1p1], [ping -q -c 3 -i 0.3 -w 2 10.89.189.1 | FORMAT_PING],
+@@ -10099,14 +9674,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 10.0.0.2 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3389,7 +4187,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10099,14 +9660,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 10.0.0.2 | FORMAT_PING], \
+@@ -10313,14 +9881,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(30.0.0.1) | sed -e 's/zone
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3405,7 +4203,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10313,14 +9867,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(30.0.0.1) | sed -e 's/zone
+@@ -10454,14 +10015,7 @@ NS_CHECK_EXEC([ns_ext1], [ping -q -c 3 -i 0.3 -w 2 172.0.0.88 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3421,7 +4219,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10454,14 +10001,7 @@ NS_CHECK_EXEC([ns_ext1], [ping -q -c 3 -i 0.3 -w 2 172.0.0.88 | FORMAT_PING], \
+@@ -10613,14 +10167,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3437,7 +4235,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10613,14 +10153,7 @@ OVS_WAIT_UNTIL([
+@@ -10781,14 +10328,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3453,7 +4251,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10781,14 +10314,7 @@ OVS_WAIT_UNTIL([
+@@ -10914,14 +10454,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3469,23 +4267,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -10914,14 +10440,7 @@ OVS_WAIT_UNTIL([
- 
- OVS_APP_EXIT_AND_WAIT([ovn-controller])
- 
--as ovn-sb
--OVS_APP_EXIT_AND_WAIT([ovsdb-server])
--
--as ovn-nb
--OVS_APP_EXIT_AND_WAIT([ovsdb-server])
--
--as northd
--OVS_APP_EXIT_AND_WAIT([ovn-northd])
-+OVN_CLEANUP_NORTHD
- 
- as
- OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11258,14 +10777,7 @@ TMPPID=$(cat $OVS_RUNDIR/ovn-controller.pid)
+@@ -11258,14 +10791,7 @@ TMPPID=$(cat $OVS_RUNDIR/ovn-controller.pid)
  check ovs-appctl -t ovn-controller exit --restart
  OVS_WAIT_WHILE([kill -0 $TMPPID 2>/dev/null])
  
@@ -3501,7 +4283,7 @@ index 202f890b7..85b14f5a8 100644
  
  AT_CLEANUP
  ])
-@@ -11418,14 +10930,7 @@ OVS_WAIT_UNTIL([
+@@ -11418,14 +10944,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3517,7 +4299,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11560,14 +11065,7 @@ acl_test to-lport "" pg
+@@ -11560,14 +11079,7 @@ acl_test to-lport "" pg
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3533,7 +4315,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11640,14 +11138,7 @@ tcp,orig=(src=10.0.0.2,dst=172.16.0.1,sport=<cleared>,dport=<cleared>),reply=(sr
+@@ -11640,14 +11152,7 @@ tcp,orig=(src=10.0.0.2,dst=172.16.0.1,sport=<cleared>,dport=<cleared>),reply=(sr
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3549,7 +4331,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11710,14 +11201,7 @@ check_row_count mac_binding 1 mac=\"00:00:00:00:00:02\"
+@@ -11710,14 +11215,7 @@ check_row_count mac_binding 1 mac=\"00:00:00:00:00:02\"
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3565,7 +4347,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -11824,14 +11308,7 @@ OVS_WAIT_FOR_OUTPUT([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.1.151) |
+@@ -11824,14 +11322,7 @@ OVS_WAIT_FOR_OUTPUT([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(172.16.1.151) |
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3581,7 +4363,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12037,14 +11514,7 @@ OVS_WAIT_UNTIL([check_est_flows 0xa], [check established flows])
+@@ -12037,14 +11528,7 @@ OVS_WAIT_UNTIL([check_est_flows 0xa], [check established flows])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3597,7 +4379,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12122,14 +11592,7 @@ AT_CHECK([ovs-ofctl dump-flows br-int | grep 'table=78, n_packets' -c], [1], [dn
+@@ -12122,14 +11606,7 @@ AT_CHECK([ovs-ofctl dump-flows br-int | grep 'table=78, n_packets' -c], [1], [dn
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3613,7 +4395,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12212,14 +11675,7 @@ NS_CHECK_EXEC([sw1-p0], [ping -q -c 3 -i 0.3 -w 2 172.16.1.100 | FORMAT_PING], \
+@@ -12212,14 +11689,7 @@ NS_CHECK_EXEC([sw1-p0], [ping -q -c 3 -i 0.3 -w 2 172.16.1.100 | FORMAT_PING], \
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3629,7 +4411,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12322,14 +11778,7 @@ wait_row_count MAC_Binding 1 logical_port=lr1-pub ip=172.24.4.100
+@@ -12322,14 +11792,7 @@ wait_row_count MAC_Binding 1 logical_port=lr1-pub ip=172.24.4.100
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3645,7 +4427,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12414,14 +11863,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | grep -c "zone=$zone_id"], [0], [2
+@@ -12414,14 +11877,7 @@ AT_CHECK([ovs-appctl dpctl/dump-conntrack | grep -c "zone=$zone_id"], [0], [2
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3661,7 +4443,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12509,12 +11951,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
+@@ -12509,12 +11965,7 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
  7 packets transmitted, 0 received, 100% packet loss, time 0ms
  ])
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
@@ -3675,7 +4457,7 @@ index 202f890b7..85b14f5a8 100644
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
  /connection dropped.*/d"])
-@@ -12575,14 +12012,7 @@ NS_CHECK_EXEC([foo], [arping -q -c 3 172.16.1.100])
+@@ -12575,14 +12026,7 @@ NS_CHECK_EXEC([foo], [arping -q -c 3 172.16.1.100])
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3691,7 +4473,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12708,14 +12138,7 @@ OVS_WAIT_UNTIL([
+@@ -12708,14 +12152,7 @@ OVS_WAIT_UNTIL([
  
  OVS_APP_EXIT_AND_WAIT([ovn-controller])
  
@@ -3707,7 +4489,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12853,14 +12276,7 @@ tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=
+@@ -12853,14 +12290,7 @@ tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=
  
  OVN_CLEANUP_CONTROLLER([hv1])
  
@@ -3723,7 +4505,7 @@ index 202f890b7..85b14f5a8 100644
  
  as
  OVS_TRAFFIC_VSWITCHD_STOP(["/failed to query port patch-.*/d
-@@ -12972,14 +12388,144 @@ icmp,orig=(src=192.168.1.2,dst=192.168.1.1,id=<cleared>,type=8,code=0),reply=(sr
+@@ -12972,14 +12402,144 @@ icmp,orig=(src=192.168.1.2,dst=192.168.1.1,id=<cleared>,type=8,code=0),reply=(sr
  
  OVN_CLEANUP_CONTROLLER([hv1])
  

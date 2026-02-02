@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.7
-Release: 31%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 43%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -533,6 +533,42 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
+* Sat Jan 24 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-40
+- Update dummy commit
+[Upstream: 274525b5056c9d836b1640ed2f26c99b35f343d3]
+
+* Fri Jan 23 2026 Ales Musil <amusil@redhat.com> - 24.03.7-39
+- lflow: Enable default drop for ND NS in with port security enabled.
+[Upstream: 4613d30139d8d5d0d9b23ae234adfab40d91f9af]
+
+* Thu Jan 22 2026 Alexandra Rukomoinikova <arukomoinikova@k2.cloud> - 24.03.7-38
+- northd: Improvements of ICMP TTL exceeded behavior. (#FDP-2870)
+[Upstream: b56d5097c4b04a5f2199141b26989171a813d86c]
+
+* Tue Jan 20 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-37
+- tests: Fix "ACL log_related" system-test.
+[Upstream: fe8e43d0085a80964e64f87430362c695185cb7a]
+
+* Wed Jan 14 2026 jun.gu <jun.gu@easystack.cn> - 24.03.7-36
+- controller: Add missing nw_ttl field to match against legit NAs.
+[Upstream: ff36db4fd92359ff6fac00b789e0403fbe62e8b2]
+
+* Tue Jan 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-35
+- pinctrl: Avoid unaligned access to dhcpv6 options.
+[Upstream: bcd0c5a8558cbf354f9f6547c17b55419430b1ba]
+
+* Tue Jan 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-34
+- controller-vtep: Properly free the ovn version at the end.
+[Upstream: 5ca819d7e35e94a7b2ef08829e5826255e8ac542]
+
+* Tue Jan 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-33
+- binding: Prevent maybe-uninitialized error for queue variable.
+[Upstream: b08ecb8f476d0052322de2e375ac79b9917691ec]
+
+* Tue Jan 06 2026 Ales Musil <amusil@redhat.com> - 24.03.7-32
+- northd: Do not assign requested tunnel key to the derived CR port. (#FDP-2764)
+[Upstream: 083d9fd20d84235fd1c69033031c53a33149ae7d]
+
 * Thu Dec 18 2025 Xie Liu <liushyshy@gmail.com> - 24.03.7-31
 - tests: Fix ACL direction consistency.
 [Upstream: 9e3942ed49eea8518b01324e2ef4cb546d4d88d8]
