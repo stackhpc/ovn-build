@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.7
-Release: 43%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 62%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -533,9 +533,73 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
-* Sat Jan 24 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-40
+* Sat Feb 28 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-56
 - Update dummy commit
-[Upstream: 274525b5056c9d836b1640ed2f26c99b35f343d3]
+[Upstream: 2ec451c9ce20c4d4555c8a972d49316a9fa0dabc]
+
+* Thu Feb 26 2026 Ales Musil <amusil@redhat.com> - 24.03.7-55
+- northd: Do not fully parse LSP port security. (#FDP-3245)
+[Upstream: 3024718cfec061cbea310f1c8553c3d9c226f107]
+
+* Wed Feb 25 2026 MJ Ponsonby <mj.ponsonby@canonical.com> - 24.03.7-54
+- tests: Sort output in flaky s390x tests.
+[Upstream: f6556dc14118eabe9196b3a14d5804916a83cfca]
+
+* Mon Feb 23 2026 Erlon R. Cruz <erlon@canonical.com> - 24.03.7-53
+- controller: ACL correctly handles fragmented traffic. (#FDP-1992)
+[Upstream: 8fbda461fdc03640e56b89fab1b6973568deba53]
+
+* Mon Feb 23 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-52
+- utilities/containers/*/Dockerfile: Install dhclient.
+[Upstream: a9982a90ae4861c4101a9bbae1be149ce3df04ef]
+
+* Wed Feb 18 2026 Ales Musil <amusil@redhat.com> - 24.03.7-51
+- controller: Add option to make port security compliant with RFC 9568. (#FDP-2979)
+[Upstream: ef8f5c1ac63e8094eaf13507013e310991db45a2]
+
+* Wed Feb 18 2026 Ales Musil <amusil@redhat.com> - 24.03.7-50
+- ovn-util: Add helper for parsing and working with masked MACs.
+[Upstream: 69a7eee0e42f4ff60531b43a85bf7bb6534478b3]
+
+* Wed Feb 18 2026 Ales Musil <amusil@redhat.com> - 24.03.7-49
+- lflow: Change the port security parsing log from INFO to WARN.
+[Upstream: 3c581c038c92a1aaab52b8aea4571597c802ee19]
+
+* Tue Feb 17 2026 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.7-48
+- northd: Do not forward unknown ether type to router ports. (#FDP-1908)
+[Upstream: fac50ea32813e5253e550875ec7bbcaf2c8c2715]
+
+* Mon Feb 16 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-47
+- inc-proc-eng: Assert that node states are in the right range.
+[Upstream: d80e5570ef94d8a6f0d3ee484e191884c505ce0f]
+
+* Mon Feb 09 2026 Ales Musil <amusil@redhat.com> - 24.03.7-46
+- tests: Replace wget with curl for failing commands.
+[Upstream: 4ebf80ec9263431781e03e5615042c6f1217e8d4]
+
+* Mon Feb 09 2026 Martin Morgenstern <martin.morgenstern@cloudandheat.com> - 24.03.7-45
+- controller: Prevent crash when SB_Global is empty.
+[Upstream: 6eddcd3fe8124fa18f5f7e9e0a0515fecfa7ddb8]
+
+* Mon Feb 09 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.7-44
+- tests: Don't use potentially unreachable IPs for IPFIX.
+[Upstream: d04b400d0b770657bf344a317d6256aca050ddc4]
+
+* Mon Feb 09 2026 Ales Musil <amusil@redhat.com> - 24.03.7-43
+- ci: Increase the disk size for CirrusCI VM.
+[Upstream: 1d2c3bb3414fedb29456013896a0dae2c9e84774]
+
+* Thu Feb 05 2026 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-42
+- tests: Use `command -v` instead of `which`.
+[Upstream: 28321487a9ac2c8868646db92eeb201e93641050]
+
+* Thu Feb 05 2026 Ales Musil <amusil@redhat.com> - 24.03.7-41
+- lflow: Add missing match on eth.src for ND port security.
+[Upstream: 7d0b7f11b7913b0e767d418fc853f15d65d209b5]
+
+* Mon Feb 02 2026 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.7-40
+- northd: Do not send ICMP packet too big for multicast traffic. (#FDP-2652)
+[Upstream: 27f9a0ac551469c68ae1ea6881b191deec7cad3e]
 
 * Fri Jan 23 2026 Ales Musil <amusil@redhat.com> - 24.03.7-39
 - lflow: Enable default drop for ND NS in with port security enabled.
