@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.7
-Release: 62%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 97%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -64,8 +64,8 @@ License: ASL 2.0 and LGPLv2+ and SISSL
 # Always pull an upstream release, since this is what we rebase to.
 Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{version}.tar.gz
 
-%define ovscommit 785a89b48db6803a2ce44e28e76d8a0025be1803
-%define ovsshortcommit 785a89b
+%define ovscommit bc99439446a1c0b94498ad7ea44f3d1d933ead90
+%define ovsshortcommit bc99439
 
 Source10: https://github.com/openvswitch/ovs/archive/%{ovscommit}.tar.gz#/openvswitch-%{ovsshortcommit}.tar.gz
 %define ovsdir ovs-%{ovscommit}
@@ -533,9 +533,121 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
-* Sat Feb 28 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-56
+* Mon Apr 20 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-84
+- Prepare for 24.03.9.
+[Upstream: bd0ef4f4c7ee6329b0d8f209669d53675c94653c]
+
+* Mon Apr 20 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-83
+- Set release date for 24.03.8.
+[Upstream: 697058648fdecfb67d7f3a11513e27af9c5d49a6]
+
+* Sat Apr 18 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-82
 - Update dummy commit
-[Upstream: 2ec451c9ce20c4d4555c8a972d49316a9fa0dabc]
+[Upstream: ae491e702b854da02c7cca8d11e7190b94716cf8]
+
+* Thu Apr 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-81
+- pinctrl: Make sure the BFD packet contains correct amount of data.
+[Upstream: b7c869bf010b931590523c48a253e26b96874b98]
+
+* Thu Apr 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-80
+- pinctrl: Unify handling of DHCPv6 options.
+[Upstream: 4bbc1dc49a969378569c6f9a2ef184845f7dbc55]
+
+* Thu Apr 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-79
+- pinctrl: Limit the IP packet size to buffer size for ICMP Need Frag.
+[Upstream: 965b6c74e3191293f82061c9b5586a8780cce33e]
+
+* Mon Apr 13 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-78
+- northd: Don't forward IP multicast to routers without IGMP relay. (#FDP-2262)
+[Upstream: 124d86e2343db740f2df8deaa855233c7a0696e0]
+
+* Tue Apr 07 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-77
+- controller: Fix bfd up too early after unexpected reboot. (#FDP-3075)
+[Upstream: 749650e8c2280bd03f2ac9215ddfd68b00cda77f]
+
+* Tue Apr 07 2026 Ales Musil <amusil@redhat.com> - 24.03.7-76
+- ci: Bump ovn-fake-multinode tag.
+[Upstream: 4c2717bdfa57cbb4d8e079dc7a4a67ac1c23818c]
+
+* Tue Apr 07 2026 MJ Ponsonby <mj.ponsonby@canonical.com> - 24.03.7-75
+- Modified the CI to use ovn-fake-multinode v0.3.
+[Upstream: 05e581764ce8dc87347229d2caa97efb05c1ff96]
+
+* Tue Apr 07 2026 Tiago Pires <tiago.pires@luizalabs.com> - 24.03.7-74
+- multinode: Fix for interfaces MTU and central prefix name.
+[Upstream: 478c8d3f2466d9f94c4b43f9261a7ad5d9728327]
+
+* Tue Apr 07 2026 Ales Musil <amusil@redhat.com> - 24.03.7-73
+- ci: Make sure that multinode test runs on correct branch.
+[Upstream: a0f2b6040a51abe4af26c99b2044c5dad49bcf01]
+
+* Tue Apr 07 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-72
+- ci: Remove upgrade test from branch-22.03
+[Upstream: cf9ffb93e5d889d34993132b20f45a061286bdb0]
+
+* Tue Apr 07 2026 Ales Musil <amusil@redhat.com> - 24.03.7-71
+- treewide: Rename references from OvS master to main.
+[Upstream: ae512bb6572453d61018b2722cc60117ce44e792]
+
+* Tue Apr 07 2026 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-70
+- tests: Stabilize localnet_learn_fdb packet-in count.
+[Upstream: 47920290301044c2ae83e231c7f25f07a0ac237a]
+
+* Tue Apr 07 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-69
+- northd: Fix requested-tnl-key not reassigned after conflict resolved by deletion. (#FDP-3560)
+[Upstream: 215bc883b5b599065fa0ce97d861033447aefd2c]
+
+* Tue Mar 31 2026 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.7-68
+- northd: Introduce disable_garp_rarp option for logical_router table. (#FDP-1537)
+[Upstream: 5c253fba5b8e459e60aada6d1e9a436a36f0f01a]
+
+* Mon Mar 23 2026 Alexandra Rukomoinikova <arukomoinikova@k2.cloud> - 24.03.7-67
+- controller: Fix an assertion failure with multiple mirror types.
+[Upstream: 70554daed6eaab148a697a048cc9a578dddec582]
+
+* Fri Mar 20 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-66
+- pinctrl: Update in-memory svc monitor structures on SB changes.
+[Upstream: 74d7e598c56e47d3a73bd7ec7aafc99eac8ed02c]
+
+* Thu Mar 19 2026 Rosemarie O'Riorden <rosemarie@redhat.com> - 24.03.7-65
+- rhel: Make version displayed to the user customizable. (#FDP-1904)
+[Upstream: 5fa1b7c53df4912b4fd4d73f0d0aa648beffb49f]
+
+* Mon Mar 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-64
+- ci: Bump action versions to support Node 24.
+[Upstream: f185de6ff7368aaee291fac8a6126b41ba8836e2]
+
+* Fri Mar 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-63
+- northd: Drop traffic for ECMP group with "discard" route.
+[Upstream: 66ff4a6a78f44d1ed0cff5a3d797f72bee5fbcac]
+
+* Fri Mar 13 2026 Felix Moebius <felix.moebius@digits.schwarz> - 24.03.7-62
+- mac-cache: Only refresh mac bindings for chassis local ports.
+[Upstream: 75ddc041bad18ef6867bdbc37af73e402eb06799]
+
+* Thu Mar 12 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-61
+- Add Dmitry Mityugov to AUTHORS.rst.
+[Upstream: 1b4a161c43015eef68c30da28f04eb8866446493]
+
+* Thu Mar 12 2026 Dmitry Mityugov <dmitry.mityugov@gmail.com> - 24.03.7-60
+- northd: Fix a discarded qualifer warning.
+[Upstream: a152d74cdebc30afc063ecb2f7b1c854efd2616b]
+
+* Tue Mar 10 2026 Felix Moebius <felix.moebius@digits.schwarz> - 24.03.7-59
+- statctrl: Remove handler specific parameters.
+[Upstream: 1f31278c389e8beaf6298b0b1ddf3ac6bff89b69]
+
+* Fri Mar 06 2026 Alexandra Rukomoinikova <arukomoinikova@k2.cloud> - 24.03.7-58
+- ic: Fix infinite route learning with same prefix and nexthop.
+[Upstream: 84a7d18688a648eaa54b4db3f3817a9572ee51b5]
+
+* Wed Mar 04 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-57
+- tests: Fix multinode test using wrong system-id.
+[Upstream: 3efece7d198fa1c1361f77c9daff44d10024362d]
+
+* Mon Mar 02 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.7-56
+- ovs: Update submodule to v3.3.8.
+[Upstream: 93203a67c805e95acf37421d775041a25c039231]
 
 * Thu Feb 26 2026 Ales Musil <amusil@redhat.com> - 24.03.7-55
 - northd: Do not fully parse LSP port security. (#FDP-3245)
