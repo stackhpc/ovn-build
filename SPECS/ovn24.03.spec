@@ -50,8 +50,8 @@ Name: %{pkgname}
 Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
-Version: 24.03.7
-Release: 97%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Version: 24.03.8
+Release: 31%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -59,7 +59,7 @@ Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 # lib/sflow*.[ch] files are SISSL
 License: ASL 2.0 and LGPLv2+ and SISSL
 
-%define ovncommit 15839d7cb85c2dbdfe6e36ed9cf8efdc27ed82ca
+%define ovncommit 697058648fdecfb67d7f3a11513e27af9c5d49a6
 
 # Always pull an upstream release, since this is what we rebase to.
 Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{version}.tar.gz
@@ -533,307 +533,47 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
-* Mon Apr 20 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-84
+* Mon Jun 01 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-14
+- ovn-controller: Clear flow-restore-wait. (#FDP-3862)
+[Upstream: 97f93c3f111d74b8231b8466c359b0739209442b]
+
+* Sat May 30 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-13
+- Update dummy commit
+[Upstream: 8cd3e4932dd075fabf86fe982c86ab8677db1ba0]
+
+* Wed May 27 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-12
+- Revert "controller: Fix bfd up too early after unexpected reboot." (#FDP-3862)
+[Upstream: 7d5b6f90f21bcd756cf29d3f2afee446bb654d54]
+
+* Wed May 27 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.8-11
+- tests: Ignore 'recirc_id left allocated' false positive.
+[Upstream: 52e60a84b14ff0f9abd6c6d192896f8d39675d4e]
+
+* Tue May 26 2026 Ales Musil <amusil@redhat.com> - 24.03.8-10
+- mac-cache: Make sure we re-arp for proper IP for LRP with multiple IPs. (#FDP-3784)
+[Upstream: ed55f7012659c0058a6093429afaea224c2b5cd8]
+
+* Wed May 20 2026 Ales Musil <amusil@redhat.com> - 24.03.8-9
+- tests: Extract the common macros for send UDP and dump ARP/NS.
+[Upstream: 663f0f5b8c6ebe0bbf3ab343da32b692d59def73]
+
+* Fri May 15 2026 Numan Siddique <numans@ovn.org> - 24.03.8-8
+- Fix the ovn-northd recompute loops for nb_cfg updates.
+[Upstream: 9d78ef7af9de4d156f4c3eafe325c90cd1e3d891]
+
+* Wed May 06 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.8-7
+- northd: Enable ARP/ND responder for localnet-sourced requests. (#FDP-3436)
+[Upstream: 20ee3d9a087e2a2a9816d2c10f0ce694862e1802]
+
+* Thu Apr 23 2026 Dmitry Mityugov <dmitry.mityugov@gmail.com> - 24.03.8-6
+- expr: Fix an old copy/paste error.
+[Upstream: d035a76d42d369d4a7ffbe84a250ab7bcd7adf25]
+
+* Thu Apr 23 2026 Ihar Hrachyshka <ihrachyshka@nvidia.com> - 24.03.8-5
+- tests: Fix localport suppress gARP scapy input.
+[Upstream: ee31a04b5a148c143d0f59e6284eba3f07237c3e]
+
+* Mon Apr 20 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-4
 - Prepare for 24.03.9.
 [Upstream: bd0ef4f4c7ee6329b0d8f209669d53675c94653c]
-
-* Mon Apr 20 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-83
-- Set release date for 24.03.8.
-[Upstream: 697058648fdecfb67d7f3a11513e27af9c5d49a6]
-
-* Sat Apr 18 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-82
-- Update dummy commit
-[Upstream: ae491e702b854da02c7cca8d11e7190b94716cf8]
-
-* Thu Apr 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-81
-- pinctrl: Make sure the BFD packet contains correct amount of data.
-[Upstream: b7c869bf010b931590523c48a253e26b96874b98]
-
-* Thu Apr 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-80
-- pinctrl: Unify handling of DHCPv6 options.
-[Upstream: 4bbc1dc49a969378569c6f9a2ef184845f7dbc55]
-
-* Thu Apr 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-79
-- pinctrl: Limit the IP packet size to buffer size for ICMP Need Frag.
-[Upstream: 965b6c74e3191293f82061c9b5586a8780cce33e]
-
-* Mon Apr 13 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-78
-- northd: Don't forward IP multicast to routers without IGMP relay. (#FDP-2262)
-[Upstream: 124d86e2343db740f2df8deaa855233c7a0696e0]
-
-* Tue Apr 07 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-77
-- controller: Fix bfd up too early after unexpected reboot. (#FDP-3075)
-[Upstream: 749650e8c2280bd03f2ac9215ddfd68b00cda77f]
-
-* Tue Apr 07 2026 Ales Musil <amusil@redhat.com> - 24.03.7-76
-- ci: Bump ovn-fake-multinode tag.
-[Upstream: 4c2717bdfa57cbb4d8e079dc7a4a67ac1c23818c]
-
-* Tue Apr 07 2026 MJ Ponsonby <mj.ponsonby@canonical.com> - 24.03.7-75
-- Modified the CI to use ovn-fake-multinode v0.3.
-[Upstream: 05e581764ce8dc87347229d2caa97efb05c1ff96]
-
-* Tue Apr 07 2026 Tiago Pires <tiago.pires@luizalabs.com> - 24.03.7-74
-- multinode: Fix for interfaces MTU and central prefix name.
-[Upstream: 478c8d3f2466d9f94c4b43f9261a7ad5d9728327]
-
-* Tue Apr 07 2026 Ales Musil <amusil@redhat.com> - 24.03.7-73
-- ci: Make sure that multinode test runs on correct branch.
-[Upstream: a0f2b6040a51abe4af26c99b2044c5dad49bcf01]
-
-* Tue Apr 07 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-72
-- ci: Remove upgrade test from branch-22.03
-[Upstream: cf9ffb93e5d889d34993132b20f45a061286bdb0]
-
-* Tue Apr 07 2026 Ales Musil <amusil@redhat.com> - 24.03.7-71
-- treewide: Rename references from OvS master to main.
-[Upstream: ae512bb6572453d61018b2722cc60117ce44e792]
-
-* Tue Apr 07 2026 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-70
-- tests: Stabilize localnet_learn_fdb packet-in count.
-[Upstream: 47920290301044c2ae83e231c7f25f07a0ac237a]
-
-* Tue Apr 07 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-69
-- northd: Fix requested-tnl-key not reassigned after conflict resolved by deletion. (#FDP-3560)
-[Upstream: 215bc883b5b599065fa0ce97d861033447aefd2c]
-
-* Tue Mar 31 2026 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.7-68
-- northd: Introduce disable_garp_rarp option for logical_router table. (#FDP-1537)
-[Upstream: 5c253fba5b8e459e60aada6d1e9a436a36f0f01a]
-
-* Mon Mar 23 2026 Alexandra Rukomoinikova <arukomoinikova@k2.cloud> - 24.03.7-67
-- controller: Fix an assertion failure with multiple mirror types.
-[Upstream: 70554daed6eaab148a697a048cc9a578dddec582]
-
-* Fri Mar 20 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-66
-- pinctrl: Update in-memory svc monitor structures on SB changes.
-[Upstream: 74d7e598c56e47d3a73bd7ec7aafc99eac8ed02c]
-
-* Thu Mar 19 2026 Rosemarie O'Riorden <rosemarie@redhat.com> - 24.03.7-65
-- rhel: Make version displayed to the user customizable. (#FDP-1904)
-[Upstream: 5fa1b7c53df4912b4fd4d73f0d0aa648beffb49f]
-
-* Mon Mar 16 2026 Ales Musil <amusil@redhat.com> - 24.03.7-64
-- ci: Bump action versions to support Node 24.
-[Upstream: f185de6ff7368aaee291fac8a6126b41ba8836e2]
-
-* Fri Mar 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-63
-- northd: Drop traffic for ECMP group with "discard" route.
-[Upstream: 66ff4a6a78f44d1ed0cff5a3d797f72bee5fbcac]
-
-* Fri Mar 13 2026 Felix Moebius <felix.moebius@digits.schwarz> - 24.03.7-62
-- mac-cache: Only refresh mac bindings for chassis local ports.
-[Upstream: 75ddc041bad18ef6867bdbc37af73e402eb06799]
-
-* Thu Mar 12 2026 Mark Michelson <mmichels@redhat.com> - 24.03.7-61
-- Add Dmitry Mityugov to AUTHORS.rst.
-[Upstream: 1b4a161c43015eef68c30da28f04eb8866446493]
-
-* Thu Mar 12 2026 Dmitry Mityugov <dmitry.mityugov@gmail.com> - 24.03.7-60
-- northd: Fix a discarded qualifer warning.
-[Upstream: a152d74cdebc30afc063ecb2f7b1c854efd2616b]
-
-* Tue Mar 10 2026 Felix Moebius <felix.moebius@digits.schwarz> - 24.03.7-59
-- statctrl: Remove handler specific parameters.
-[Upstream: 1f31278c389e8beaf6298b0b1ddf3ac6bff89b69]
-
-* Fri Mar 06 2026 Alexandra Rukomoinikova <arukomoinikova@k2.cloud> - 24.03.7-58
-- ic: Fix infinite route learning with same prefix and nexthop.
-[Upstream: 84a7d18688a648eaa54b4db3f3817a9572ee51b5]
-
-* Wed Mar 04 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-57
-- tests: Fix multinode test using wrong system-id.
-[Upstream: 3efece7d198fa1c1361f77c9daff44d10024362d]
-
-* Mon Mar 02 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.7-56
-- ovs: Update submodule to v3.3.8.
-[Upstream: 93203a67c805e95acf37421d775041a25c039231]
-
-* Thu Feb 26 2026 Ales Musil <amusil@redhat.com> - 24.03.7-55
-- northd: Do not fully parse LSP port security. (#FDP-3245)
-[Upstream: 3024718cfec061cbea310f1c8553c3d9c226f107]
-
-* Wed Feb 25 2026 MJ Ponsonby <mj.ponsonby@canonical.com> - 24.03.7-54
-- tests: Sort output in flaky s390x tests.
-[Upstream: f6556dc14118eabe9196b3a14d5804916a83cfca]
-
-* Mon Feb 23 2026 Erlon R. Cruz <erlon@canonical.com> - 24.03.7-53
-- controller: ACL correctly handles fragmented traffic. (#FDP-1992)
-[Upstream: 8fbda461fdc03640e56b89fab1b6973568deba53]
-
-* Mon Feb 23 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-52
-- utilities/containers/*/Dockerfile: Install dhclient.
-[Upstream: a9982a90ae4861c4101a9bbae1be149ce3df04ef]
-
-* Wed Feb 18 2026 Ales Musil <amusil@redhat.com> - 24.03.7-51
-- controller: Add option to make port security compliant with RFC 9568. (#FDP-2979)
-[Upstream: ef8f5c1ac63e8094eaf13507013e310991db45a2]
-
-* Wed Feb 18 2026 Ales Musil <amusil@redhat.com> - 24.03.7-50
-- ovn-util: Add helper for parsing and working with masked MACs.
-[Upstream: 69a7eee0e42f4ff60531b43a85bf7bb6534478b3]
-
-* Wed Feb 18 2026 Ales Musil <amusil@redhat.com> - 24.03.7-49
-- lflow: Change the port security parsing log from INFO to WARN.
-[Upstream: 3c581c038c92a1aaab52b8aea4571597c802ee19]
-
-* Tue Feb 17 2026 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.7-48
-- northd: Do not forward unknown ether type to router ports. (#FDP-1908)
-[Upstream: fac50ea32813e5253e550875ec7bbcaf2c8c2715]
-
-* Mon Feb 16 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.7-47
-- inc-proc-eng: Assert that node states are in the right range.
-[Upstream: d80e5570ef94d8a6f0d3ee484e191884c505ce0f]
-
-* Mon Feb 09 2026 Ales Musil <amusil@redhat.com> - 24.03.7-46
-- tests: Replace wget with curl for failing commands.
-[Upstream: 4ebf80ec9263431781e03e5615042c6f1217e8d4]
-
-* Mon Feb 09 2026 Martin Morgenstern <martin.morgenstern@cloudandheat.com> - 24.03.7-45
-- controller: Prevent crash when SB_Global is empty.
-[Upstream: 6eddcd3fe8124fa18f5f7e9e0a0515fecfa7ddb8]
-
-* Mon Feb 09 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.7-44
-- tests: Don't use potentially unreachable IPs for IPFIX.
-[Upstream: d04b400d0b770657bf344a317d6256aca050ddc4]
-
-* Mon Feb 09 2026 Ales Musil <amusil@redhat.com> - 24.03.7-43
-- ci: Increase the disk size for CirrusCI VM.
-[Upstream: 1d2c3bb3414fedb29456013896a0dae2c9e84774]
-
-* Thu Feb 05 2026 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-42
-- tests: Use `command -v` instead of `which`.
-[Upstream: 28321487a9ac2c8868646db92eeb201e93641050]
-
-* Thu Feb 05 2026 Ales Musil <amusil@redhat.com> - 24.03.7-41
-- lflow: Add missing match on eth.src for ND port security.
-[Upstream: 7d0b7f11b7913b0e767d418fc853f15d65d209b5]
-
-* Mon Feb 02 2026 Lorenzo Bianconi <lorenzo.bianconi@redhat.com> - 24.03.7-40
-- northd: Do not send ICMP packet too big for multicast traffic. (#FDP-2652)
-[Upstream: 27f9a0ac551469c68ae1ea6881b191deec7cad3e]
-
-* Fri Jan 23 2026 Ales Musil <amusil@redhat.com> - 24.03.7-39
-- lflow: Enable default drop for ND NS in with port security enabled.
-[Upstream: 4613d30139d8d5d0d9b23ae234adfab40d91f9af]
-
-* Thu Jan 22 2026 Alexandra Rukomoinikova <arukomoinikova@k2.cloud> - 24.03.7-38
-- northd: Improvements of ICMP TTL exceeded behavior. (#FDP-2870)
-[Upstream: b56d5097c4b04a5f2199141b26989171a813d86c]
-
-* Tue Jan 20 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-37
-- tests: Fix "ACL log_related" system-test.
-[Upstream: fe8e43d0085a80964e64f87430362c695185cb7a]
-
-* Wed Jan 14 2026 jun.gu <jun.gu@easystack.cn> - 24.03.7-36
-- controller: Add missing nw_ttl field to match against legit NAs.
-[Upstream: ff36db4fd92359ff6fac00b789e0403fbe62e8b2]
-
-* Tue Jan 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-35
-- pinctrl: Avoid unaligned access to dhcpv6 options.
-[Upstream: bcd0c5a8558cbf354f9f6547c17b55419430b1ba]
-
-* Tue Jan 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-34
-- controller-vtep: Properly free the ovn version at the end.
-[Upstream: 5ca819d7e35e94a7b2ef08829e5826255e8ac542]
-
-* Tue Jan 13 2026 Ales Musil <amusil@redhat.com> - 24.03.7-33
-- binding: Prevent maybe-uninitialized error for queue variable.
-[Upstream: b08ecb8f476d0052322de2e375ac79b9917691ec]
-
-* Tue Jan 06 2026 Ales Musil <amusil@redhat.com> - 24.03.7-32
-- northd: Do not assign requested tunnel key to the derived CR port. (#FDP-2764)
-[Upstream: 083d9fd20d84235fd1c69033031c53a33149ae7d]
-
-* Thu Dec 18 2025 Xie Liu <liushyshy@gmail.com> - 24.03.7-31
-- tests: Fix ACL direction consistency.
-[Upstream: 9e3942ed49eea8518b01324e2ef4cb546d4d88d8]
-
-* Thu Dec 18 2025 Xie Liu <liushyshy@gmail.com> - 24.03.7-30
-- controller: CT zone allocation for DGP LSPs enabled ACL.
-[Upstream: 73327991d684534ee964446cd9a6d7a888a93fd5]
-
-* Tue Dec 16 2025 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-29
-- tests: Ignore AT_CHECK stderr for `grep ... | grep -q`.
-[Upstream: b867e7111b4e0a75fd16f2ff5f58debfff50a2b8]
-
-* Tue Dec 16 2025 Frode Nordahl <fnordahl@ubuntu.com> - 24.03.7-28
-- tests: Fix test for tc rounding behavior change.
-[Upstream: ced8157fc9a6a98de44657c89cf42402ae5bf9ae]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-27
-- tests/ovn-ic: Add missing OVN_CLEANUP_IC call.
-[Upstream: a9d2ec49dbccd14432f984784ed1e2709f02461b]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-26
-- tests/ovn-controller: Add missing cleanup.
-[Upstream: 91e14feec77d03368207c99f384d37d23003b1aa]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-25
-- tests/ovn: Add missing partial cleanups.
-[Upstream: a238fd1deae94a89b19abfdbca62af68cd4dcf6d]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-24
-- tests/ovn: Add missing OVN_CLEANUP calls.
-[Upstream: 91080a0a5487232819b7752d799ebf23594fab7d]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-23
-- tests: Add OVN_CLEANUP_DBS and use it in tests that already stopped northd.
-[Upstream: 369276c1c3959d8646e120cd6a620c30b53f2420]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-22
-- tests/ovn-controller-vtep: Remove unused test net.
-[Upstream: 02ead19698d92b0bf555018050a491ee09bc9f48]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-21
-- tests/ovn-controller-vtep: Add missing OVN_CONTROLLER_VTEP_STOP calls.
-[Upstream: de5cac684af53038c575da3ec5f90975a7ee8c1c]
-
-* Thu Dec 11 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-20
-- tests: Add missing OVN_CLEANUP_NORTHD calls.
-[Upstream: 64dfd08c8c1ed5c6f0deffb97a2198482a91374f]
-
-* Mon Dec 08 2025 Ihar Hrachyshka <ihar.hrachyshka@gmail.com> - 24.03.7-19
-- tests: Require scapy for 'IP packet buffering'.
-[Upstream: 9331d8076a2de2afc0e2dbc19043ca5de37ac510]
-
-* Thu Dec 04 2025 Ilya Maximets <i.maximets@ovn.org> - 24.03.7-18
-- ovs: Bump to include fix for non-existent rows in idl uuid lookup. (#FDP-2807)
-[Upstream: 18c635009943866ed39dc82b06a4f636e5d0f389]
-
-* Thu Dec 04 2025 Ales Musil <amusil@redhat.com> - 24.03.7-17
-- northd: Skip transient SB datapath IDL records. (#FDP-2784)
-[Upstream: db72a15e55fe1b7b672fdf35aca8506eb1c20144]
-
-* Thu Dec 04 2025 Ales Musil <amusil@redhat.com> - 24.03.7-16
-- pinctrl: Make sure we can learn IGMP groups only on switches.
-[Upstream: 423485a3614fc013233218fe36442089c02d1651]
-
-* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-15
-- pinctrl: Fix Service_Monitor reported online very slowly. (#FDP-2649)
-[Upstream: 80aede654f7226ccfebcbcd93c12ad05852639ee]
-
-* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-14
-- pinctrl: Fix Service_Monitor status change not updated.
-[Upstream: f458fa380b6202dea2cc44f870733b05947bca5b]
-
-* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-13
-- pinctrl: Speed up Service_Monitor updates.
-[Upstream: 3ecaa269f2468c56eb0ed4227f934a5484162732]
-
-* Tue Dec 02 2025 Xavier Simonart <xsimonar@redhat.com> - 24.03.7-12
-- pinctrl: Avoid waking-up pinctrl thread too often.
-[Upstream: e33d4450afbc764619ab8dc3ea2480341ab43878]
-
-* Thu Nov 20 2025 Dumitru Ceara <dceara@redhat.com> - 24.03.7-11
-- tests: Ensure all central components stop at the end of the test.
-[Upstream: b8c618a89d8fb6b6ad993d5e1cf1d4c602807206]
-
-* Thu Nov 20 2025 Ales Musil <amusil@redhat.com> - 24.03.7-10
-- pinctrl: Prevent leak of mac_binding and fdb struct.
-[Upstream: 3169ba2204f3049af5162e8a2bc87b13dc6494e4]
-
-* Wed Nov 19 2025 Mark Michelson <mmichels@redhat.com> - 24.03.7-9
-- Prepare for 24.03.8.
-[Upstream: f3c31c02b44cf0b4cbb017e1ce1cd800d9fe8d99]
 
