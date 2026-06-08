@@ -50,7 +50,7 @@ Name: %{pkgname}
 Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
-Version: 24.03.6
+Version: 24.03.8
 Release: 22%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
@@ -59,7 +59,7 @@ Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 # lib/sflow*.[ch] files are SISSL
 License: ASL 2.0 and LGPLv2+ and SISSL
 
-%define ovncommit 95950716caf3cbba69ca2b8cbc79dd9ce5b086b6
+%define ovncommit 697058648fdecfb67d7f3a11513e27af9c5d49a6
 
 # Always pull an upstream release, since this is what we rebase to.
 Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{version}.tar.gz
@@ -68,13 +68,13 @@ Source: https://github.com/ovn-org/ovn/archive/%{ovncommit}.tar.gz#/ovn-%{versio
 %define ovsshortcommit d8b9702
 
 Source10: https://github.com/openvswitch/ovs/archive/%{ovscommit}.tar.gz#/openvswitch-%{ovsshortcommit}.tar.gz
-Source11: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/ovn24.03.patch
-Source12: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/x86_64-native-linuxapp-gcc-config
-Source13: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/ppc_64-power8-linuxapp-gcc-config
-Source14: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/arm64-armv8a-linuxapp-gcc-config
-Source15: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/set_config.sh
-Source16: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/gen_config_group.sh
-Source17: https://raw.githubusercontent.com/mnasiadka/ovn/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/configlib.sh
+# Source11: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/ovn24.03.patch
+Source12: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/x86_64-native-linuxapp-gcc-config
+Source13: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/ppc_64-power8-linuxapp-gcc-config
+Source14: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/arm64-armv8a-linuxapp-gcc-config
+Source15: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/set_config.sh
+Source16: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/gen_config_group.sh
+Source17: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/el10-sig-nfv-ovn24.03/SOURCES/configlib.sh
 %define ovsdir ovs-%{ovscommit}
 
 %define docutilsver 0.12
@@ -94,7 +94,7 @@ Source504: arm64-armv8a-linuxapp-gcc-config
 Source505: ppc_64-power8-linuxapp-gcc-config
 Source506: x86_64-native-linuxapp-gcc-config
 
-Patch:     %{pkgname}.patch
+# Patch:     %{pkgname}.patch
 
 # FIXME Sphinx is used to generate some manpages, unfortunately, on RHEL, it's
 # in the -optional repository and so we can't require it directly since RHV
