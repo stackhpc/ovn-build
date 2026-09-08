@@ -1,16 +1,20 @@
 diff --git a/NEWS b/NEWS
-index 284eb4c71..0457a07c8 100644
+index 284eb4c71..183351951 100644
 --- a/NEWS
 +++ b/NEWS
-@@ -1,3 +1,6 @@
-+OVN v24.03.9 - xx xxx xxxx
+@@ -1,3 +1,10 @@
++OVN v24.03.10 - xx xxx xxxx
++---------------------------
++
++OVN v24.03.9 - 16 Jun 2026
 +--------------------------
++  - Bug fixes
 +
  OVN v24.03.8 - 20 Apr 2026
  --------------------------
    - Security: Fixed vulnerability CVE-2026-5265.
 diff --git a/configure.ac b/configure.ac
-index 878a8f47b..630b3b440 100644
+index 878a8f47b..d36a87414 100644
 --- a/configure.ac
 +++ b/configure.ac
 @@ -13,7 +13,7 @@
@@ -18,7 +22,7 @@ index 878a8f47b..630b3b440 100644
  
  AC_PREREQ(2.63)
 -AC_INIT(ovn, 24.03.8, bugs@openvswitch.org)
-+AC_INIT(ovn, 24.03.9, bugs@openvswitch.org)
++AC_INIT(ovn, 24.03.10, bugs@openvswitch.org)
  AC_CONFIG_MACRO_DIR([m4])
  AC_CONFIG_AUX_DIR([build-aux])
  AC_CONFIG_HEADERS([config.h])
@@ -107,10 +111,46 @@ index 76dd3a3a8..17fab5323 100644
               const struct sbrec_chassis *,
               const struct sbrec_ha_chassis_group_table *,
 diff --git a/controller/mac-cache.c b/controller/mac-cache.c
-index 6117e5e5e..6a7cbbc85 100644
+index 6117e5e5e..c6096665c 100644
 --- a/controller/mac-cache.c
 +++ b/controller/mac-cache.c
-@@ -998,13 +998,29 @@ mac_binding_probe_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+@@ -457,10 +457,9 @@ mac_binding_update_log(const char *action,
+ 
+ void
+ mac_binding_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+-                      void *data)
++                      void *data, long long timewall_now)
+ {
+     struct mac_cache_data *cache_data = data;
+-    long long timewall_now = time_wall_msec();
+ 
+     struct mac_cache_stats *stats;
+     LIST_FOR_EACH_POP (stats, list_node, stats_list) {
+@@ -556,10 +555,10 @@ fdb_update_log(const char *action,
+ }
+ 
+ void
+-fdb_stats_run(struct ovs_list *stats_list, uint64_t *req_delay, void *data)
++fdb_stats_run(struct ovs_list *stats_list, uint64_t *req_delay, void *data,
++              long long timewall_now)
+ {
+     struct mac_cache_data *cache_data = data;
+-    long long timewall_now = time_wall_msec();
+ 
+     struct mac_cache_stats *stats;
+     LIST_FOR_EACH_POP (stats, list_node, stats_list) {
+@@ -936,9 +935,8 @@ mac_binding_probe_stats_process_flow_stats(
+ 
+ void
+ mac_binding_probe_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+-                            void *data)
++                            void *data, long long timewall_now)
+ {
+-    long long timewall_now = time_wall_msec();
+     struct mac_binding_probe_data *probe_data = data;
+     struct mac_cache_data *cache_data = probe_data->cache_data;
+ 
+@@ -998,13 +996,29 @@ mac_binding_probe_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
              continue;
          }
  
@@ -146,6 +186,36 @@ index 6117e5e5e..6a7cbbc85 100644
              mac_binding_update_log("Sending ARP/ND request for active",
                                     &mb->data, true, threshold,
                                     stats->idle_age_ms, since_updated_ms);
+diff --git a/controller/mac-cache.h b/controller/mac-cache.h
+index 0444b8020..550efca53 100644
+--- a/controller/mac-cache.h
++++ b/controller/mac-cache.h
+@@ -196,14 +196,14 @@ mac_binding_stats_process_flow_stats(struct ovs_list *stats_list,
+                                      struct ofputil_flow_stats *ofp_stats);
+ 
+ void mac_binding_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+-                           void *data);
++                           void *data, long long timewall_now);
+ 
+ /* FDB stat processing. */
+ void fdb_stats_process_flow_stats(struct ovs_list *stats_list,
+                                   struct ofputil_flow_stats *ofp_stats);
+ 
+ void fdb_stats_run(struct ovs_list *stats_list, uint64_t *req_delay,
+-                   void *data);
++                   void *data, long long timewall_now);
+ 
+ void mac_cache_stats_destroy(struct ovs_list *stats_list);
+ 
+@@ -241,6 +241,7 @@ void mac_binding_probe_stats_process_flow_stats(
+         struct ofputil_flow_stats *ofp_stats);
+ 
+ void mac_binding_probe_stats_run(struct ovs_list *stats_list,
+-                                 uint64_t *req_delay, void *data);
++                                 uint64_t *req_delay, void *data,
++                                 long long timewall_now);
+ 
+ #endif /* controller/mac-cache.h */
 diff --git a/controller/ovn-controller.8.xml b/controller/ovn-controller.8.xml
 index 402fc8983..8e9d4fe2b 100644
 --- a/controller/ovn-controller.8.xml
@@ -429,28 +499,142 @@ index 036ec5466..88e0b44ed 100644
          } else if (ovs_txn_status == -1) {
              /* The commit is still in progress */
          } else {
+diff --git a/controller/statctrl.c b/controller/statctrl.c
+index 486b9d6f8..9f03a469b 100644
+--- a/controller/statctrl.c
++++ b/controller/statctrl.c
+@@ -64,7 +64,8 @@ struct stats_node {
+                                struct ofputil_flow_stats *ofp_stats);
+     /* Function to process the parsed stats.
+      * This function runs in main thread locked behind mutex. */
+-    void (*run)(struct ovs_list *stats_list, uint64_t *req_delay, void *data);
++    void (*run)(struct ovs_list *stats_list, uint64_t *req_delay, void *data,
++                long long timewall_now);
+     /* Name of the stats node corresponding stopwatch. */
+     const char *stopwatch_name;
+ };
+@@ -205,6 +206,7 @@ statctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
+ 
+     bool schedule_updated = false;
+     long long now = time_msec();
++    long long timewall_now = time_wall_msec();
+ 
+     ovs_mutex_lock(&mutex);
+     statctrl_ctx.new_main_seq = seq_read(statctrl_ctx.main_seq);
+@@ -213,7 +215,8 @@ statctrl_run(struct ovsdb_idl_txn *ovnsb_idl_txn,
+         uint64_t prev_delay = node->request_delay;
+ 
+         stopwatch_start(node->stopwatch_name, time_msec());
+-        node->run(&node->stats_list, &node->request_delay, node_data[i]);
++        node->run(&node->stats_list, &node->request_delay,
++                  node_data[i], timewall_now);
+         stopwatch_stop(node->stopwatch_name, time_msec());
+ 
+         schedule_updated |=
 diff --git a/debian/changelog b/debian/changelog
-index e1fde5d79..f2b798159 100644
+index e1fde5d79..5c5811712 100644
 --- a/debian/changelog
 +++ b/debian/changelog
-@@ -1,3 +1,9 @@
+@@ -1,3 +1,15 @@
++ovn (24.03.10-1) unstable; urgency=low
++   [ OVN team ]
++   * New upstream version
++
++ -- OVN team <dev@openvswitch.org>  Tue, 16 Jun 2026 12:11:28 -0400
++
 +ovn (24.03.9-1) unstable; urgency=low
 +   [ OVN team ]
 +   * New upstream version
 +
-+ -- OVN team <dev@openvswitch.org>  Mon, 20 Apr 2026 05:52:08 -0400
++ -- OVN team <dev@openvswitch.org>  Tue, 16 Jun 2026 12:11:28 -0400
 +
  ovn (24.03.8-1) unstable; urgency=low
     [ OVN team ]
     * New upstream version
+diff --git a/debian/ovn-host.init b/debian/ovn-host.init
+index a34d2926c..55761311e 100755
+--- a/debian/ovn-host.init
++++ b/debian/ovn-host.init
+@@ -18,7 +18,7 @@ test -x /usr/share/ovn/scripts/ovn-ctl || exit 0
+ _SYSTEMCTL_SKIP_REDIRECT=yes
+ SYSTEMCTL_SKIP_REDIRECT=yes
+ 
+-. /usr/share/ovn/scripts/ovs-lib
++. /usr/share/ovn/scripts/ovn-lib
+ if [ -e /etc/default/ovn-host ]; then
+     . /etc/default/ovn-host
+ fi
 diff --git a/dummy_file b/dummy_file
 new file mode 100644
-index 000000000..f2374d232
+index 000000000..ff10dce6f
 --- /dev/null
 +++ b/dummy_file
 @@ -0,0 +1 @@
-+2026-05-30 00:00:24.452046
++2026-08-01 00:00:26.961486
 \ No newline at end of file
+diff --git a/ic/ovn-ic.c b/ic/ovn-ic.c
+index ab17802fd..9ba96be57 100644
+--- a/ic/ovn-ic.c
++++ b/ic/ovn-ic.c
+@@ -1710,6 +1710,32 @@ advertise_routes(struct ic_context *ctx,
+     }
+ }
+ 
++static void
++collect_learned_routes(struct ic_router_info *ic_lr)
++{
++    const struct nbrec_logical_router *lr = ic_lr->lr;
++
++    /* Check static routes of the LR and collect learned routes */
++    for (int i = 0; i < lr->n_static_routes; i++) {
++        const struct nbrec_logical_router_static_route *nb_route
++            = lr->static_routes[i];
++        struct uuid isb_uuid;
++        if (smap_get_uuid(&nb_route->external_ids, "ic-learned-route",
++                          &isb_uuid)) {
++            /* It is a learned route */
++            if (!add_to_routes_learned(&ic_lr->routes_learned, nb_route, lr,
++                                       &isb_uuid)) {
++                static struct vlog_rate_limit rl = VLOG_RATE_LIMIT_INIT(5, 1);
++                VLOG_WARN_RL(&rl, "Bad format of learned route in NB: "
++                             "%s -> %s. Delete it.", nb_route->ip_prefix,
++                             nb_route->nexthop);
++                nbrec_logical_router_update_static_routes_delvalue(lr,
++                    nb_route);
++            }
++        }
++    }
++}
++
+ static void
+ build_ts_routes_to_adv(struct ic_context *ctx,
+                        struct ic_router_info *ic_lr,
+@@ -1778,6 +1804,7 @@ collect_lr_routes(struct ic_context *ctx,
+ 
+     struct hmap *routes_ad;
+     const struct icnbrec_transit_switch *t_sw;
++    bool routes_built = false;
+     for (int i = 0; i < ic_lr->n_isb_pbs; i++) {
+         isb_pb = ic_lr->isb_pbs[i];
+         key = icnbrec_transit_switch_index_init_row(
+@@ -1807,10 +1834,17 @@ collect_lr_routes(struct ic_context *ctx,
+         }
+         lrp_name = get_lrp_name_by_ts_port_name(ctx, isb_pb->logical_port);
+         route_table = get_route_table_by_lrp_name(ctx, lrp_name);
++        routes_built = true;
+         build_ts_routes_to_adv(ctx, ic_lr, routes_ad, &ts_port_addrs,
+                                nb_global, route_table);
+         destroy_lport_addresses(&ts_port_addrs);
+     }
++    /* If no port binding had valid addresses (e.g. LR disabled
++     * and PB address cleared simultaneously), collect learned routes so
++     * they can be deleted by sync_learned_routes(). */
++    if (!routes_built) {
++        collect_learned_routes(ic_lr);
++    }
+ }
+ 
+ static void
 diff --git a/lib/expr.c b/lib/expr.c
 index 25a0f75ac..7cc128704 100644
 --- a/lib/expr.c
@@ -464,10 +648,70 @@ index 25a0f75ac..7cc128704 100644
          return a_type < b_type ? -1 : a_type > b_type;
      } else if (a->type == EXPR_T_AND || a->type == EXPR_T_OR) {
          size_t a_len = ovs_list_size(&a->expr->andor);
+diff --git a/northd/en-global-config.c b/northd/en-global-config.c
+index 462a56006..333d791f3 100644
+--- a/northd/en-global-config.c
++++ b/northd/en-global-config.c
+@@ -621,5 +621,21 @@ chassis_features_changed(const struct chassis_features *present,
+         return true;
+     }
+ 
++    if (present->ct_commit_nat_v2 != updated->ct_commit_nat_v2) {
++        return true;
++    }
++
++    if (present->ct_commit_to_zone != updated->ct_commit_to_zone) {
++        return true;
++    }
++
++    if (present->ct_next_zone != updated->ct_next_zone) {
++        return true;
++    }
++
++    if (present->ct_state_save != updated->ct_state_save) {
++        return true;
++    }
++
+     return false;
+ }
 diff --git a/northd/northd.c b/northd/northd.c
-index 535ed7a4b..9f3985a65 100644
+index 535ed7a4b..3599d47f8 100644
 --- a/northd/northd.c
 +++ b/northd/northd.c
+@@ -8658,14 +8658,14 @@ build_lswitch_rport_arp_req_flows_for_lbnats(
+          * expect ARP requests/NS for the DNAT external_ip.
+          */
+         if (nat_entry_is_v6(nat_entry)) {
+-            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v6,
++            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v6_reachable,
+                                nat->external_ip)) {
+                 build_lswitch_rport_arp_req_flow(
+                     nat->external_ip, AF_INET6, sw_op, sw_od, 80, lflows,
+                     stage_hint, lflow_ref);
+             }
+         } else {
+-            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v4,
++            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v4_reachable,
+                                nat->external_ip)) {
+                 build_lswitch_rport_arp_req_flow(
+                     nat->external_ip, AF_INET, sw_op, sw_od, 80, lflows,
+@@ -8698,14 +8698,14 @@ build_lswitch_rport_arp_req_flows_for_lbnats(
+          * expect ARP requests/NS for the SNAT external_ip.
+          */
+         if (nat_entry_is_v6(nat_entry)) {
+-            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v6,
++            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v6_reachable,
+                                nat->external_ip)) {
+                 build_lswitch_rport_arp_req_flow(
+                     nat->external_ip, AF_INET6, sw_op, sw_od, 80, lflows,
+                     stage_hint, lflow_ref);
+             }
+         } else {
+-            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v4,
++            if (!sset_contains(&lr_stateful_rec->lb_ips->ips_v4_reachable,
+                                nat->external_ip)) {
+                 build_lswitch_rport_arp_req_flow(
+                     nat->external_ip, AF_INET, sw_op, sw_od, 80, lflows,
 @@ -9052,26 +9052,45 @@ build_lswitch_lflows_admission_control(struct ovn_datapath *od,
                    lflow_ref);
  }
@@ -688,10 +932,19 @@ index c9c1445d2..20da1f621 100644
            action <code>next;</code>.  These flows prevent OVN from replying to,
            for example, an ARP request emitted by a VM for its own IP address.
 diff --git a/northd/ovn-northd.c b/northd/ovn-northd.c
-index 3bfa66d80..ddd83eee9 100644
+index 3bfa66d80..a31d207eb 100644
 --- a/northd/ovn-northd.c
 +++ b/northd/ovn-northd.c
-@@ -1033,10 +1033,18 @@ main(int argc, char *argv[])
+@@ -861,6 +861,8 @@ main(int argc, char *argv[])
+     ovsdb_idl_omit_alert(ovnnb_idl_loop.idl, &nbrec_nb_global_col_hv_cfg);
+     ovsdb_idl_omit_alert(ovnnb_idl_loop.idl,
+                          &nbrec_nb_global_col_hv_cfg_timestamp);
++    ovsdb_idl_omit_alert(ovnnb_idl_loop.idl,
++                         &nbrec_logical_router_port_col_status);
+ 
+     unixctl_command_register("nb-connection-status", "", 0, 0,
+                              ovn_conn_show, ovnnb_idl_loop.idl);
+@@ -1033,10 +1035,18 @@ main(int argc, char *argv[])
  
                  /* Make sure we don't bump the next_cfg when we shouldn't.
                   * This should prevent ovn-nbctl sync calls to return before
@@ -711,7 +964,7 @@ index 3bfa66d80..ddd83eee9 100644
                  }
  
                  /* If there are any errors, we force a full recompute in order
-@@ -1047,7 +1055,8 @@ main(int argc, char *argv[])
+@@ -1047,7 +1057,8 @@ main(int argc, char *argv[])
                      inc_proc_northd_force_recompute_immediate();
                  }
  
@@ -721,6 +974,23 @@ index 3bfa66d80..ddd83eee9 100644
                      VLOG_INFO("OVNSB commit failed, "
                                "force recompute next time.");
                      inc_proc_northd_force_recompute_immediate();
+@@ -1083,7 +1094,7 @@ main(int argc, char *argv[])
+             ovsdb_idl_wait(ovnsb_idl_loop.idl);
+ 
+             /* Force a full recompute next time we become active. */
+-            inc_proc_northd_force_recompute_immediate();
++            inc_proc_northd_force_recompute();
+         }
+ 
+         if (clear_idl_track) {
+@@ -1151,6 +1162,7 @@ ovn_northd_pause(struct unixctl_conn *conn, int argc OVS_UNUSED,
+     struct northd_state  *state = state_;
+     state->paused = true;
+ 
++    poll_immediate_wake();
+     unixctl_command_reply(conn, NULL);
+ }
+ 
 diff --git a/tests/multinode-macros.at b/tests/multinode-macros.at
 index bcd5dc708..f4cf327cc 100644
 --- a/tests/multinode-macros.at
@@ -1538,6 +1808,36 @@ index 9aa96eb42..ca5250351 100644
  
  AT_SETUP([redirect-bridged to non-gw destination switch port])
  
+diff --git a/tests/ovn-ic.at b/tests/ovn-ic.at
+index 30b33c699..f3bc74ded 100644
+--- a/tests/ovn-ic.at
++++ b/tests/ovn-ic.at
+@@ -2505,6 +2505,25 @@ OVS_WAIT_FOR_OUTPUT([ovn_as az1 ovn-nbctl lr-route-list lr11 | grep 192.168 |
+ 192.168.0.0/24 169.254.101.22
+ ])
+ 
++# Do the same but with ovn-ic handling both northd and isb change at the same time.
++echo az1/ic going to sleep
++AT_CHECK([kill -STOP $(cat az1/ic/ovn-ic.pid)])
++on_exit "test -e az1/ic/ovn-ic.pid && kill -CONT $(cat az1/ic/ovn-ic.pid)"
++
++check ovn_as az1 ovn-nbctl --wait=sb set logical_router lr11 enable=false
++echo az1/ic going to wake up
++AT_CHECK([kill -CONT $(cat az1/ic/ovn-ic.pid)])
++
++OVS_WAIT_FOR_OUTPUT([ovn_as az1 ovn-nbctl lr-route-list lr11 | grep 192.168 |
++             grep learned | awk '{print $1, $2}' | sort ], [0], [dnl
++])
++
++check ovn_as az1 ovn-nbctl set logical_router lr11 enable=true
++OVS_WAIT_FOR_OUTPUT([ovn_as az1 ovn-nbctl lr-route-list lr11 | grep 192.168 |
++             grep learned | awk '{print $1, $2}' | sort ], [0], [dnl
++192.168.0.0/24 169.254.101.22
++])
++
+ OVN_CLEANUP_IC([az1], [az2])
+ 
+ AT_CLEANUP
 diff --git a/tests/ovn-macros.at b/tests/ovn-macros.at
 index 25c85889b..dd2b5923c 100644
 --- a/tests/ovn-macros.at
@@ -1581,11 +1881,178 @@ index 25c85889b..dd2b5923c 100644
  # Wrapper on top of ovn-trace, stripping some things and storing the trace
  # output to a file called 'trace'.  For now it strips the rows starting
  # with a '#'.  This should correspond to the flow key and might be displayed
+diff --git a/tests/ovn-nbctl.at b/tests/ovn-nbctl.at
+index b4d3a65f4..a08a2a013 100644
+--- a/tests/ovn-nbctl.at
++++ b/tests/ovn-nbctl.at
+@@ -246,29 +246,29 @@ ovn_nbctl_test_acl() {
+    AT_CHECK([grep 'label must in range 0...4294967295' stderr], [0], [ignore])
+ 
+    AT_CHECK([ovn-nbctl $2 acl-list $1], [0], [dnl
+-from-lport   600 (udp) drop log()
+-from-lport   400 (tcp) drop
+-from-lport   200 (ip) drop
+-from-lport    70 (icmp) allow-related label=1234
+-from-lport   500 (tcp) allow [[after-lb]]
+-from-lport   300 (tcp) drop [[after-lb]]
+-from-lport   300 (udp) allow [[after-lb]]
+-  to-lport   500 (udp) drop log(name=test,severity=info)
+-  to-lport   300 (tcp) drop
+-  to-lport   100 (ip) drop
+-  to-lport    70 (icmp) allow-related label=1235
++from-lport   600 (udp) drop log() [[tier 0]]
++from-lport   400 (tcp) drop [[tier 0]]
++from-lport   200 (ip) drop [[tier 0]]
++from-lport    70 (icmp) allow-related label=1234 [[tier 0]]
++from-lport   500 (tcp) allow [[tier 0]] [[after-lb]]
++from-lport   300 (tcp) drop [[tier 0]] [[after-lb]]
++from-lport   300 (udp) allow [[tier 0]] [[after-lb]]
++  to-lport   500 (udp) drop log(name=test,severity=info) [[tier 0]]
++  to-lport   300 (tcp) drop [[tier 0]]
++  to-lport   100 (ip) drop [[tier 0]]
++  to-lport    70 (icmp) allow-related label=1235 [[tier 0]]
+ ])
+ 
+    dnl Delete in one direction.
+    AT_CHECK([ovn-nbctl $2 acl-del $1 to-lport])
+    AT_CHECK([ovn-nbctl $2 acl-list $1], [0], [dnl
+-from-lport   600 (udp) drop log()
+-from-lport   400 (tcp) drop
+-from-lport   200 (ip) drop
+-from-lport    70 (icmp) allow-related label=1234
+-from-lport   500 (tcp) allow [[after-lb]]
+-from-lport   300 (tcp) drop [[after-lb]]
+-from-lport   300 (udp) allow [[after-lb]]
++from-lport   600 (udp) drop log() [[tier 0]]
++from-lport   400 (tcp) drop [[tier 0]]
++from-lport   200 (ip) drop [[tier 0]]
++from-lport    70 (icmp) allow-related label=1234 [[tier 0]]
++from-lport   500 (tcp) allow [[tier 0]] [[after-lb]]
++from-lport   300 (tcp) drop [[tier 0]] [[after-lb]]
++from-lport   300 (udp) allow [[tier 0]] [[after-lb]]
+ ])
+ 
+    dnl Delete all ACLs.
+@@ -283,8 +283,8 @@ from-lport   300 (udp) allow [[after-lb]]
+    dnl Delete a single flow.
+    AT_CHECK([ovn-nbctl $2 acl-del $1 from-lport 400 tcp])
+    AT_CHECK([ovn-nbctl $2 acl-list $1], [0], [dnl
+-from-lport   600 (udp) drop
+-from-lport   200 (ip) drop
++from-lport   600 (udp) drop [[tier 0]]
++from-lport   200 (ip) drop [[tier 0]]
+ ])
+ }
+ 
+@@ -1601,6 +1601,10 @@ AT_CHECK([ovn-nbctl lrp-list lr0 | uuidfilt], [0], [dnl
+ <1> (lrp1)
+ ])
+ 
++AT_CHECK([ovn-nbctl show lr0 | grep 'peer:'], [0], [dnl
++        peer: lrp1-peer
++])
++
+ AT_CHECK([ovn-nbctl lr-add lr1])
+ AT_CHECK([ovn-nbctl lrp-add lr0 lrp1 00:00:00:01:02:03 192.168.1.1/24], [1], [],
+   [ovn-nbctl: lrp1: a port with this name already exists
+@@ -2659,12 +2663,25 @@ check_column 3 nb:ACL tier priority=1001
+ check ovn-nbctl --tier=2 acl-add ls from-lport 1002 "ip" drop
+ check_column 2 nb:ACL tier priority=1002
+ 
++check ovn-nbctl acl-add ls from-lport 999 "ip" allow
++AT_CHECK([ovn-nbctl acl-list ls], [0], [dnl
++from-lport   999 (ip) allow [[tier 0]]
++from-lport  1002 (ip) drop [[tier 2]]
++from-lport  1001 (ip) drop [[tier 3]]
++from-lport  1000 (ip) drop [[tier 3]]
++])
++check ovn-nbctl acl-del ls from-lport 999 "ip"
++
+ # Removing the tier 3 acls from ls should result in 1 ACL
+ # remaining.
+ check ovn-nbctl --tier=3 acl-del ls
+ check_row_count nb:ACL 1
+ check_column 2 nb:ACL tier priority=1002
+ 
++AT_CHECK([ovn-nbctl acl-list ls], [0], [dnl
++from-lport  1002 (ip) drop [[tier 2]]
++])
++
+ # Add two egress ACLs at tier 2.
+ check ovn-nbctl --tier=2 acl-add ls to-lport 1000 "ip" drop
+ check ovn-nbctl --tier=2 acl-add ls to-lport 1001 "ip" drop
+@@ -2712,12 +2729,23 @@ check_row_count nb:ACL 1 tier=1
+ check_row_count nb:ACL 1 tier=2
+ check_row_count nb:ACL 1 tier=3
+ 
++AT_CHECK([ovn-nbctl acl-list ls], [0], [dnl
++from-lport  1000 (ip) drop [[tier 1]]
++from-lport  1000 (ip) drop [[tier 2]]
++from-lport  1000 (ip) drop [[tier 3]]
++])
++
+ # Specifying tier 1 should result in only one ACL being deleted.
+ check ovn-nbctl --tier=1 acl-del ls from-lport 1000 "ip"
+ check_row_count nb:ACL 2
+ check_row_count nb:ACL 1 tier=2
+ check_row_count nb:ACL 1 tier=3
+ 
++AT_CHECK([ovn-nbctl acl-list ls], [0], [dnl
++from-lport  1000 (ip) drop [[tier 2]]
++from-lport  1000 (ip) drop [[tier 3]]
++])
++
+ # Not specifying a tier should result in all ACLs being deleted.
+ check ovn-nbctl acl-del ls from-lport 1000 "ip"
+ check_row_count nb:ACL 0
 diff --git a/tests/ovn-northd.at b/tests/ovn-northd.at
-index 447b52d2d..a9cf57493 100644
+index 447b52d2d..aa3da3c48 100644
 --- a/tests/ovn-northd.at
 +++ b/tests/ovn-northd.at
-@@ -9229,6 +9229,7 @@ AT_CHECK([ovn-nbctl --wait=sb sync])
+@@ -251,11 +251,6 @@ check ovn-nbctl --wait=sb sync
+ # Check for the hosting-chassis status being set by northd
+ wait_row_count nb:Logical_Router_Port 1 name=lrp1 status:hosting-chassis=ch1
+ 
+-# Clear the hosting-chassis status from LRP and assert northd repopulates it
+-check ovn-nbctl remove logical_router_port lrp1 status hosting-chassis
+-check ovn-nbctl --wait=sb sync
+-wait_row_count nb:Logical_Router_Port 1 name=lrp1 status:hosting-chassis=ch1
+-
+ # Now remove the chassis from the port binding record and assert that the
+ # hosting-chassis status was removed by northd
+ check ovn-sbctl clear Port_Binding cr-lrp1 chassis
+@@ -811,7 +806,13 @@ Status: paused
+ AS_BOX([Verify that ovn-northd is paused])
+ # Now ovn-northd won't respond by adding a datapath, because it's paused.
+ check ovn-nbctl ls-add sw0
++cnt1=$(as northd ovn-appctl -t ovn-northd coverage/read-counter poll_zero_timeout)
+ check sleep 5
++cnt2=$(as northd ovn-appctl -t ovn-northd coverage/read-counter poll_zero_timeout)
++delta=$((cnt2 - cnt1))
++echo "$cnt1 poll_zero_timeout before sleep(5), and $cnt2 after"
++AT_CHECK([test $((cnt2 - cnt1)) -lt 100])
++
+ check_row_count Datapath_Binding 0
+ 
+ # Do not resume both main and backup right after each other
+@@ -5518,7 +5519,15 @@ AT_CHECK([grep "ls_in_l2_lkup" ls1_lflows | sed 's/table=../table=??/' | sort],
+ 
+ 
+ # Make sure that there is no flow for VIP 192.168.4.100 as it is unreachable.
+-AT_CHECK([grep "ls_in_l2_lkup" ls1_lflows | grep "192.168.4.100" | grep -v clone | grep "_MC_flood" -c], [1], [0
++AT_CHECK([grep "ls_in_l2_lkup" ls1_lflows | grep "192.168.4.100" -c], [1], [0
++])
++
++AS_BOX([Adding an dnat_and_snat for LB unreachable VIP on ro1])
++check ovn-nbctl --wait=sb lr-nat-add ro1 dnat_and_snat 192.168.4.100 192.168.1.100
++
++ovn-sbctl lflow-list ls1 > ls1_lflows
++AT_CHECK([grep "ls_in_l2_lkup" ls1_lflows | grep "192.168.4.100" | ovn_strip_lflows], [0], [dnl
++  table=??(ls_in_l2_lkup      ), priority=80   , match=(flags[[1]] == 0 && arp.op == 1 && arp.tpa == 192.168.4.100), action=(clone {outport = "ls1-ro1"; output; }; outport = "_MC_flood_l2"; output;)
+ ])
+ 
+ OVN_CLEANUP_NORTHD
+@@ -9229,6 +9238,7 @@ AT_CHECK([ovn-nbctl --wait=sb sync])
  # Check MAC learning flows with 'localnet_learn_fdb' default (false)
  AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort | sed 's/table=./table=?/'], [0], [dnl
    table=? (ls_in_lookup_fdb   ), priority=0    , match=(1), action=(next;)
@@ -1593,7 +2060,7 @@ index 447b52d2d..a9cf57493 100644
    table=? (ls_in_put_fdb      ), priority=0    , match=(1), action=(next;)
  ])
  
-@@ -9237,6 +9238,7 @@ AT_CHECK([ovn-nbctl --wait=sb lsp-set-options ln_port localnet_learn_fdb=true])
+@@ -9237,6 +9247,7 @@ AT_CHECK([ovn-nbctl --wait=sb lsp-set-options ln_port localnet_learn_fdb=true])
  AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort | sed 's/table=./table=?/'], [0], [dnl
    table=? (ls_in_lookup_fdb   ), priority=0    , match=(1), action=(next;)
    table=? (ls_in_lookup_fdb   ), priority=100  , match=(inport == "ln_port"), action=(flags.localnet = 1; reg0[[11]] = lookup_fdb(inport, eth.src); next;)
@@ -1601,7 +2068,7 @@ index 447b52d2d..a9cf57493 100644
    table=? (ls_in_put_fdb      ), priority=0    , match=(1), action=(next;)
    table=? (ls_in_put_fdb      ), priority=100  , match=(inport == "ln_port" && reg0[[11]] == 0), action=(put_fdb(inport, eth.src); next;)
  ])
-@@ -9245,6 +9247,7 @@ AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort
+@@ -9245,6 +9256,7 @@ AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort
  AT_CHECK([ovn-nbctl --wait=sb lsp-set-options ln_port localnet_learn_fdb=false])
  AT_CHECK([ovn-sbctl dump-flows ls0 | grep -e 'ls_in_\(put\|lookup\)_fdb' | sort | sed 's/table=./table=?/'], [0], [dnl
    table=? (ls_in_lookup_fdb   ), priority=0    , match=(1), action=(next;)
@@ -1609,7 +2076,7 @@ index 447b52d2d..a9cf57493 100644
    table=? (ls_in_put_fdb      ), priority=0    , match=(1), action=(next;)
  ])
  
-@@ -9558,6 +9561,110 @@ AT_CHECK([grep "lr_in_dnat " R1flows_2lbs | sed 's/table=../table=??/' | sort],
+@@ -9558,6 +9570,110 @@ AT_CHECK([grep "lr_in_dnat " R1flows_2lbs | sed 's/table=../table=??/' | sort],
  ])
  
  
@@ -1720,6 +2187,21 @@ index 447b52d2d..a9cf57493 100644
  OVN_CLEANUP_NORTHD
  AT_CLEANUP
  ])
+@@ -10957,12 +11073,10 @@ check as northd ovn-appctl -t ovn-northd inc-engine/clear-stats
+ check ovn-nbctl --wait=sb lrp-set-gateway-chassis lrp hv1
+ wait_column "hosting-chassis=hv1" nb:Logical_Router_Port status name=lrp
+ 
+-# There will be 3 recomputes of northd engine node
++# There will be 2 recomputes of northd engine node
+ #   1. missing handler for input NB_logical_router
+ #   2. missing handler for input SB_ha_chassis_group
+-#   3. missing handler for input NB_logical_router when ovn-northd
+-#      updates the hosting-chassis option in NB_logical_router_port.
+-check_recompute_counter 3 3
++check_recompute_counter 2 2
+ CHECK_NO_CHANGE_AFTER_RECOMPUTE
+ 
+ check as northd ovn-appctl -t ovn-northd inc-engine/clear-stats
 diff --git a/tests/ovn.at b/tests/ovn.at
 index 943faa9ed..6dd62ece1 100644
 --- a/tests/ovn.at
@@ -2157,3 +2639,177 @@ index 943faa9ed..6dd62ece1 100644
  OVN_FOR_EACH_NORTHD([
  AT_SETUP([MAC binding aging - probing distributed GW router])
  AT_SKIP_IF([test $HAVE_SCAPY = no])
+diff --git a/tests/system-common-macros.at b/tests/system-common-macros.at
+index f6332f7c2..1da983238 100644
+--- a/tests/system-common-macros.at
++++ b/tests/system-common-macros.at
+@@ -42,7 +42,10 @@ m4_define([NS_CHECK_EXEC],
+ #
+ # Expands into the proper ovs-vsctl commands to create a bridge with the
+ # appropriate type, and allows additional arguments to be passed.
+-m4_define([ADD_BR], [ovs-vsctl _ADD_BR([$1]) -- $2])
++# A stable datapath-id derived from the bridge name is set.
++m4_define([ADD_BR],
++  [dpid=$(printf '%016x' $(echo '$1' | cksum | cut -d ' ' -f1))
++   ovs-vsctl _ADD_BR([$1]) -- set Bridge $1 other-config:datapath-id="$dpid" -- $2])
+ 
+ # ADD_VETH([port], [namespace], [ovs-br], [ip_addr] [mac_addr], [gateway],
+ #          [ip_addr_flags] [ip6_addr] [gateway6])
+@@ -105,7 +108,7 @@ m4_define([FORMAT_CT],
+ #
+ m4_define([NETNS_DAEMONIZE],
+    [ip netns exec $1 $2 & echo $! > $3
+-     echo "kill \`cat $3\`" >> cleanup
++     on_exit "kill \`cat $3\`"
+    ]
+ )
+ 
+@@ -145,12 +148,13 @@ m4_define([OVS_CHECK_CT_ZERO_SNAT],
+ #
+ # Tries to load specified kernel module and removes it after
+ # if it wasn't loaded before this call.
++# Skips the test if the module cannot be loaded.
+ #
+ m4_define([LOAD_MODULE],
+     [if ! lsmod | grep -q $1; then
+          on_exit 'modprobe -q -r $1'
+      fi
+-     AT_CHECK([modprobe $1])
++     AT_SKIP_IF([! modprobe $1])
+     ]
+ )
+ 
+diff --git a/tests/system-kmod-macros.at b/tests/system-kmod-macros.at
+index ebff553c9..a6122163a 100644
+--- a/tests/system-kmod-macros.at
++++ b/tests/system-kmod-macros.at
+@@ -60,9 +60,13 @@ m4_define([CONFIGURE_VETH_OFFLOADS],
+ # Perform requirements checks for running conntrack tests, and flush the
+ # kernel conntrack tables when the test is finished.
+ #
++# nf_conntrack_ipv[46] are old names in kernels before 4.18.  These will
++# fail on newer kernels, while nf_conntrack will fail on older ones.  But
++# these failures do not affect the test execution.
++#
+ m4_define([CHECK_CONNTRACK],
+-     m4_foreach([mod], [[nf_conntrack_ipv4], [nf_conntrack_ipv6], [nf_nat_ftp],
+-                        [nf_nat_tftp]],
++     m4_foreach([mod], [[nf_conntrack_ipv4], [nf_conntrack_ipv6],
++                        [nf_conntrack], [nf_conntrack_netlink]],
+                 [modprobe mod && on_exit 'modprobe -r mod' || echo "Module mod not loaded."
+                 ])
+      sysctl -w net.netfilter.nf_conntrack_helper=0
+@@ -72,9 +76,13 @@ m4_define([CHECK_CONNTRACK],
+ # CHECK_CONNTRACK_ALG()
+ #
+ # Perform requirements checks for running conntrack ALG tests. The kernel
+-# supports ALG, so no check is needed.
++# supports ALG, so no check is needed.  But we need to load the modules.
+ #
+-m4_define([CHECK_CONNTRACK_ALG])
++m4_define([CHECK_CONNTRACK_ALG],
++     m4_foreach([mod], [[nf_nat_ftp], [nf_nat_tftp]],
++                [modprobe mod && on_exit 'modprobe -r mod' || echo "Module mod not loaded."
++                ])
++)
+ 
+ # CHECK_CONNTRACK_LOCAL_STACK()
+ #
+diff --git a/tests/system-ovn.at b/tests/system-ovn.at
+index fead026cd..fc2dbae00 100644
+--- a/tests/system-ovn.at
++++ b/tests/system-ovn.at
+@@ -11959,6 +11959,8 @@ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
+ 3 packets transmitted, 3 received, 0% packet loss, time 0ms
+ ])
+ check ovn-nbctl --wait=hv set load_balancer lb0 options:add_route=false
++# Wait for revalidation of stale megaflows which may lag behind.
++check ovs-appctl revalidator/wait
+ NS_CHECK_EXEC([vm1], [ping -q -c 3 -i 0.3 -w 2 172.18.1.12 | FORMAT_PING], \
+ [0], [dnl
+ 7 packets transmitted, 0 received, 100% packet loss, time 0ms
+@@ -12248,7 +12250,7 @@ ADD_VETH(bar1, bar1, br-int, "192.168.2.2/24", "f0:00:00:01:02:05", \
+ check ovn-nbctl lsp-add bar bar1 \
+ -- lsp-set-addresses bar1 "f0:00:00:01:02:05 192.168.2.2"
+ 
+-check ovn-nbctl set logical_router R2 options:lb_force_snat_ip="20.0.0.5"
++check ovn-nbctl set logical_router R2 options:lb_force_snat_ip="20.0.0.2"
+ 
+ AT_CHECK([ovn-nbctl -- create chassis_template_var chassis="hv1" \
+           variables="{vip=172.16.1.1,vport1=8000,backends1=\"192.168.1.2:80,192.168.2.2:80\"}"],
+@@ -12264,12 +12266,12 @@ check ovn-nbctl --wait=hv sync
+ OVS_START_L7([foo1], [http])
+ OVS_START_L7([bar1], [http])
+ 
+-NETNS_START_TCPDUMP([foo1], [-neei foo1 src 20.0.0.5 and tcp], [foo1])
+-NETNS_START_TCPDUMP([bar1], [-neei bar1 src 20.0.0.5 and tcp], [bar1])
++NETNS_START_TCPDUMP([foo1], [-neei foo1 src 20.0.0.2 and tcp], [foo1])
++NETNS_START_TCPDUMP([bar1], [-neei bar1 src 20.0.0.2 and tcp], [bar1])
+ 
+ check ovs-appctl dpctl/flush-conntrack
+ for i in $(seq 10); do
+-    NS_EXEC([alice1], [wget 172.16.1.1:8000 -t 5 -T 1 --retry-connrefused -v -o wget$i.log])
++    NS_CHECK_EXEC([alice1], [wget 172.16.1.1:8000 -t 5 -T 1 --retry-connrefused -v -o wget$i.log])
+ done
+ 
+ OVS_WAIT_UNTIL([
+@@ -12281,10 +12283,10 @@ OVS_WAIT_UNTIL([
+     test "${n_pkt}" -ge 1
+ ])
+ 
+-AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(20.0.0.5) | \
++AT_CHECK([ovs-appctl dpctl/dump-conntrack | FORMAT_CT(20.0.0.2) | \
+ sed -e 's/zone=[[0-9]]*/zone=<cleared>/'], [0], [dnl
+-tcp,orig=(src=172.16.1.2,dst=192.168.1.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.1.2,dst=20.0.0.5,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
+-tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.2.2,dst=20.0.0.5,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
++tcp,orig=(src=172.16.1.2,dst=192.168.1.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.1.2,dst=20.0.0.2,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
++tcp,orig=(src=172.16.1.2,dst=192.168.2.2,sport=<cleared>,dport=<cleared>),reply=(src=192.168.2.2,dst=20.0.0.2,sport=<cleared>,dport=<cleared>),zone=<cleared>,protoinfo=(state=<cleared>)
+ ])
+ 
+ OVN_CLEANUP_CONTROLLER([hv1])
+diff --git a/utilities/ovn-nbctl.c b/utilities/ovn-nbctl.c
+index 147bb882c..b93dd7952 100644
+--- a/utilities/ovn-nbctl.c
++++ b/utilities/ovn-nbctl.c
+@@ -815,6 +815,10 @@ print_lr(const struct nbrec_logical_router *lr, struct ds *s)
+             ds_put_cstr(s, "]\n");
+             free(gcs);
+         }
++
++        if (lrp->peer) {
++            ds_put_format(s, "        peer: %s\n", lrp->peer);
++        }
+     }
+ 
+     for (size_t i = 0; i < lr->n_nat; i++) {
+@@ -923,6 +927,7 @@ nbctl_pre_show(struct ctl_context *ctx)
+     ovsdb_idl_add_column(ctx->idl, &nbrec_logical_router_port_col_networks);
+     ovsdb_idl_add_column(ctx->idl, &nbrec_logical_router_port_col_options);
+     ovsdb_idl_add_column(ctx->idl, &nbrec_logical_router_port_col_gateway_chassis);
++    ovsdb_idl_add_column(ctx->idl, &nbrec_logical_router_port_col_peer);
+ 
+     ovsdb_idl_add_column(ctx->idl, &nbrec_gateway_chassis_col_chassis_name);
+ 
+@@ -2126,10 +2131,10 @@ acl_cmp(const void *acl1_, const void *acl2_)
+         return dir1 < dir2 ? -1 : 1;
+     } else if (after_lb1 != after_lb2) {
+         return after_lb2 ? -1 : 1;
++    } else if (acl1->tier != acl2->tier) {
++        return acl1->tier < acl2->tier ? -1 : 1;
+     } else if (acl1->priority != acl2->priority) {
+         return acl1->priority > acl2->priority ? -1 : 1;
+-    } else if (acl1->tier != acl2->tier) {
+-        return acl1->tier > acl2->tier ? -1 : 1;
+     } else {
+         return strcmp(acl1->match, acl2->match);
+     }
+@@ -2226,6 +2231,9 @@ nbctl_acl_list(struct ctl_context *ctx)
+         if (acl->label) {
+           ds_put_format(&ctx->output, " label=%"PRId64, acl->label);
+         }
++
++        ds_put_format(&ctx->output, " [tier %"PRId64"]", acl->tier);
++
+         if (smap_get_bool(&acl->options, "apply-after-lb", false)) {
+             ds_put_cstr(&ctx->output, " [after-lb]");
+         }

@@ -51,7 +51,7 @@ Summary: Open Virtual Network support
 Group: System Environment/Daemons
 URL: http://www.ovn.org/
 Version: 24.03.8
-Release: 31%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
+Release: 55%{?commit0:.%{date}git%{shortcommit0}}%{?dist}
 Provides: openvswitch%{pkgver}-ovn-common = %{?epoch:%{epoch}:}%{version}-%{release}
 Obsoletes: openvswitch%{pkgver}-ovn-common < 2.11.0-1
 
@@ -216,6 +216,7 @@ popd
         --disable-libcapng \
 %endif
         --enable-ssl \
+        --with-version-suffix=-%{release} \
         --with-pkidir=%{_sharedstatedir}/openvswitch/pki
 
 make %{?_smp_mflags}
@@ -533,13 +534,85 @@ fi
 %{_unitdir}/ovn-controller-vtep.service
 
 %changelog
-* Mon Jun 01 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-14
+* Sat Aug 01 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-32
+- Update dummy commit
+[Upstream: d6412dbc03b683ea96d71ae3296d29f3841a55be]
+
+* Mon Jul 20 2026 Joshua Zhang <joshua.zhang@canonical.com> - 24.03.8-31
+- debian: Source ovn-lib from ovn-host init script.
+[Upstream: dd45c938817e116e42f9a4f42be4c501d205bf14]
+
+* Mon Jul 20 2026 Amir Aslan Aslani <amiraslanaslani6@gmail.com> - 24.03.8-30
+- northd: Add missing ARP/ND flows for unreachable LB NATs.
+[Upstream: 7813151608ac3fc1a848934b97cb3595c827e1c5]
+
+* Wed Jun 24 2026 Ales Musil <amusil@redhat.com> - 24.03.8-29
+- northd: Add missing feature change checks.
+[Upstream: 5ad50fff53d293d4d7ace064ee5aca2f5121aa2e]
+
+* Fri Jun 19 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.8-28
+- northd: Fix 100% CPU when northd is paused.
+[Upstream: 64195cdf5731566a47f05388ee58497604d5707c]
+
+* Fri Jun 19 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.8-27
+- ovn-ic: Fix routes not deleted when lr is disabled.
+[Upstream: 02a91508f1a92ce8e76835d705f73cf6d134f792]
+
+* Fri Jun 19 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.8-26
+- controller: Fix mac-cache race condition causing extra ARP.
+[Upstream: 111132e3679f7bcbbd4e6a73fc6e9f170a68fcec]
+
+* Tue Jun 16 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-25
+- Prepare for 24.03.10.
+[Upstream: f9fe78f0ad059c17f9f39bb77df5c6c6701394eb]
+
+* Tue Jun 16 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-24
+- Set release date for 24.03.9.
+[Upstream: bd3baf441086577057e31b19dd616f878a478702]
+
+* Tue Jun 16 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.8-23
+- system-tests: Cleanup NETNS_DAEMONIZE in right order.
+[Upstream: 5ff3857c3ce20de49e9f635f99fb42ee7f6c2042]
+
+* Tue Jun 16 2026 Xavier Simonart <xsimonar@redhat.com> - 24.03.8-22
+- system-tests: Skip test instead of fail if module not found.
+[Upstream: 1d2d67e03f87c1b747bdc93bf85eb3b832b00037]
+
+* Wed Jun 10 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.8-21
+- tests: system-ovn: Fix force SNAT IP in load-balancer template test.
+[Upstream: 9204ec37bf7de0c31c8caf94bc28df2a08904c1f]
+
+* Wed Jun 10 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.8-20
+- system-kmod-macros: Load modern nf_conntrack modules.
+[Upstream: 09af5a1753da795b1679895f558aa9e9d54f3275]
+
+* Wed Jun 10 2026 Ilya Maximets <i.maximets@ovn.org> - 24.03.8-19
+- system-kmod-macros: Do not load (t)ftp modules for non-(t)ftp tests.
+[Upstream: 459cfe6926d766483178db18ea60f5ab9f81981a]
+
+* Tue Jun 09 2026 Ales Musil <amusil@redhat.com> - 24.03.8-18
+- system-tests: Set stable datapath-id on bridges in system tests.
+[Upstream: 5ab533a54616cbf172634cf19e3b6ca2b30195f4]
+
+* Fri Jun 05 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.8-17
+- northd: Ignore LRP.status write-only column in northd.
+[Upstream: bcfb4b46ab3e2c1cd085982e77c4988764818bd6]
+
+* Fri Jun 05 2026 Ales Musil <amusil@redhat.com> - 24.03.8-16
+- ovn-nbctl: Display tier in "acl-list" for multi-tier ACLs. (#FDP-3585)
+[Upstream: b04f7a8a3206145ad72d223b12d0a9d5ed60f5df]
+
+* Fri Jun 05 2026 Ales Musil <amusil@redhat.com> - 24.03.8-15
+- ovn-nbctl: Display peer info in "show" for router ports. (#FDP-3716)
+[Upstream: d023b02de8074fb2637ef4ae400db826501c3f7d]
+
+* Wed Jun 03 2026 Dumitru Ceara <dceara@redhat.com> - 24.03.8-14
+- tests: Fix flaky "Loadbalancer add-route option" system test.
+[Upstream: 28a3da73f16e742ae89e2e2888281008435efef4]
+
+* Mon Jun 01 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-13
 - ovn-controller: Clear flow-restore-wait. (#FDP-3862)
 [Upstream: 97f93c3f111d74b8231b8466c359b0739209442b]
-
-* Sat May 30 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-13
-- Update dummy commit
-[Upstream: 8cd3e4932dd075fabf86fe982c86ab8677db1ba0]
 
 * Wed May 27 2026 Mark Michelson <mmichels@redhat.com> - 24.03.8-12
 - Revert "controller: Fix bfd up too early after unexpected reboot." (#FDP-3862)
