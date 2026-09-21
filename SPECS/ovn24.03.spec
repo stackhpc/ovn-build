@@ -77,17 +77,17 @@ Source100: https://pypi.io/packages/source/d/docutils/docutils-%{docutilsver}.ta
 Source101: https://pypi.io/packages/source/P/Pygments/Pygments-%{pygmentsver}.tar.gz
 Source102: https://pypi.io/packages/source/S/Sphinx/Sphinx-%{sphinxver}.tar.gz
 
-Source500: configlib.sh
-Source501: gen_config_group.sh
-Source502: set_config.sh
+Source500: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/configlib.sh
+Source501: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/gen_config_group.sh
+Source502: https://github.com/stackhpc/ovn-build/blob/c9s-sig-nfv-ovn24.03/SOURCES/set_config.sh
 
 # Important: source503 is used as the actual copy file
 # @TODO: this causes a warning - fix it?
-Source504: arm64-armv8a-linuxapp-gcc-config
-Source505: ppc_64-power8-linuxapp-gcc-config
-Source506: x86_64-native-linuxapp-gcc-config
+Source504: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/arm64-armv8a-linuxapp-gcc-config
+Source505: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/arm64-armv8a-linuxapp-gcc-config
+Source506: https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/x86_64-native-linuxapp-gcc-config
 
-Patch:     %{pkgname}.patch
+Patch:     https://raw.githubusercontent.com/stackhpc/ovn-build/refs/heads/c9s-sig-nfv-ovn24.03/SOURCES/ovn24.03.patch
 
 # FIXME Sphinx is used to generate some manpages, unfortunately, on RHEL, it's
 # in the -optional repository and so we can't require it directly since RHV
